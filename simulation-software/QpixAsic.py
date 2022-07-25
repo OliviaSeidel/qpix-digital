@@ -185,8 +185,8 @@ class QPFifo:
       current number of events stored in the FIFO
     """
 
-    if not isinstance(data, QPByte):
-      raise QPException("Can not add this data-type to a QPFifo!")
+    # if not isinstance(data, QPByte):
+      # raise QPException("Can not add this data-type to a QPFifo!")
 
     self._data.append(data)
     self._curSize += 1
@@ -466,7 +466,7 @@ class QPixAsic:
           destAsic = self.connections[self.config.DirMask.value]
           toDir = self.config.DirMask.value+2
           fromDir = (toDir)%4
-          outlist.append((destAsic, fromDir, byteOut, finishTime))
+          outList.append((destAsic, fromDir, byteOut, finishTime))
 
         # if it's not a read or a write, it's a command interrogation
         else:
@@ -532,7 +532,7 @@ class QPixAsic:
 
     #check to see if the hit time of the every new hit after the first is 
     #the same as the first hit time, then check with second hit, then third ...
-    for ch, hitTime in newHits[1:]:
+    for ch, timestamp in newHits[1:]:
       if timestamp == prevByte.timestamp:
         prevByte.AddChannel(ch)
       else:
@@ -552,11 +552,11 @@ class QPixAsic:
 
     then sort each according to time
     """
-    print(f'injecting hits for ({self.row}, {self.col})')
+    # print(f'injecting hits for ({self.row}, {self.col})')
 
     # place all of the injected times and channels into self._times and self._channels
     self._times.extend(times)
-    
+   
     # include default channels
     if channels is None:
       channels = [[1,3,8]] * len(times)
@@ -564,10 +564,12 @@ class QPixAsic:
       self._channels.extend(channels)
 
     #sort the times and channels
+    #zip outputs tuples, so turn times and channels if more hits injected
     self._times, self._channels = zip(*sorted(zip(self._times, self._channels)))
-    
-    # print(f'injected hits are at times {self._times} and ch {self._channels}')
+    self._times = [*self._times]
+    self._channels = [*self._channels]
 
+    
   def _ReadHits(self, targetTime):
     """
     make times and channels arrays to contain all hits within the last asic hit

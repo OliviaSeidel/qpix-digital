@@ -6,6 +6,7 @@ import random
 import math
 import time
 from enum import Enum
+from unicodedata import decimal
 import numpy as np
 from dataclasses import dataclass
 
@@ -334,6 +335,7 @@ class QPixAsic:
     self.col            = col
     self.connections    = [None] * 4 
     self._command       = None
+    self._timeout = timeout
 
     # timing, absolute and relative with random starting phase
     self.timeoutStart   = 0
@@ -555,6 +557,10 @@ class QPixAsic:
     # print(f'injecting hits for ({self.row}, {self.col})')
 
     # place all of the injected times and channels into self._times and self._channels
+    times = times.round(decimals=14)
+    for ind, j in enumerate(times):
+      if j in self._times:
+        times[ind]+=self.tOsc
     self._times.extend(times)
    
     # include default channels
@@ -568,7 +574,6 @@ class QPixAsic:
     self._times, self._channels = zip(*sorted(zip(self._times, self._channels)))
     self._times = [*self._times]
     self._channels = [*self._channels]
-
     
   def _ReadHits(self, targetTime):
     """
@@ -604,7 +609,8 @@ class QPixAsic:
         self._localFifo.Write(prevByte)
         newhitcount+=1
       
-      self._lastAsicHitTime = targetTime
+        self._lastAsicHitTime = targetTime
+      self._times = [*self._times]
 
       return newhitcount
     

@@ -472,6 +472,8 @@ class QpixAsicArray():
                     config = AsicConfig(AsicDirMask.East, timeout)
                     config.ManRoute = True
                     self.WriteAsicRegister(asic.row, asic.col, config)
+        if route == None:
+            pass
 
 
 if __name__ == "__main__":

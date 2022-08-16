@@ -1,4 +1,4 @@
-from QpixAsic import QPByte, QPixAsic, ProcQueue, DaqNode, AsicWord, AsicState, AsicConfig
+from QpixAsic import QPByte, QPixAsic, ProcQueue, DaqNode, AsicWord, AsicState, AsicConfig, AsicDirMask
 import matplotlib.pyplot as plt
 import random
 import math
@@ -48,6 +48,8 @@ def MakeFifoBars(qparray):
             ax.bar(Nem, RemoteFifoMax[i, d], color=ColorWheelOfFun[i])
     ax.set(ylabel='Max Sizes', title='Remote Fifo Maximum Sizes')
     ax.legend(handles=[*patches])
+    plt.tight_layout()
+    plt.show()
 
 def viewAsicState(qparray, time_begin=-100e-9, time_end=300e-6):
     """
@@ -100,6 +102,7 @@ def viewAsicState(qparray, time_begin=-100e-9, time_end=300e-6):
     ax.grid(True)
     ax.set_yticks([i+1.15 for i in range(len(asics))], labels=[f"({asic.row}, {asic.col})" for asic in asics])
     ax.set_xlim(time_begin, time_end)
+    plt.tight_layout()
 
     # fake legend points
     markers = [plt.Line2D([0,0],[0,0],color=color, marker='o', linestyle='') for color in color_mapping.values()]
@@ -428,6 +431,49 @@ class QpixAsicArray():
                         processed += 1
                         self._queue.AddQueueItem(*item)
         return processed
+    def Route(self, route = None, timeout = 1.5e4):
+        '''
+        Defines the routing of the asics manually
+            left - routes all of the remote information to the left most asics
+                    then moves all data to (0,0)
+            snake - serpentine style, snakes through all asics before
+                    remote data origin until (0,0)
+        '''
+        if route == 'left':
+            for asic in self:
+                if asic.row == 0: 
+                    config = AsicConfig(AsicDirMask.West, timeout)
+                    config.ManRoute = True
+                    self.WriteAsicRegister(asic.row, asic.col, config)
+                elif not(asic.col == 0):
+                    config = AsicConfig(AsicDirMask.West, timeout)
+                    config.ManRoute = True
+                    self.WriteAsicRegister(asic.row, asic.col, config)
+                else:
+                    config = AsicConfig(AsicDirMask.North, timeout)
+                    config.ManRoute = True
+                    self.WriteAsicRegister(asic.row, asic.col, config)
+        if route == 'snake':
+            for asic in self:
+                if not(asic.row%2 == 0) and asic.col == self._ncols-1:
+                    config = AsicConfig(AsicDirMask.North, timeout)
+                    config.ManRoute = True
+                    self.WriteAsicRegister(asic.row, asic.col, config)
+                elif asic.row%2 == 0:
+                    if asic.col == 0 and not(asic.row == 0):
+                        config = AsicConfig(AsicDirMask.North, timeout)
+                        config.ManRoute = True
+                        self.WriteAsicRegister(asic.row, asic.col, config)
+                        continue
+                    config = AsicConfig(AsicDirMask.West, timeout)
+                    config.ManRoute = True
+                    self.WriteAsicRegister(asic.row, asic.col, config)
+                else:
+                    config = AsicConfig(AsicDirMask.East, timeout)
+                    config.ManRoute = True
+                    self.WriteAsicRegister(asic.row, asic.col, config)
+        if route == None:
+            pass
 
 
 if __name__ == "__main__":

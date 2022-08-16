@@ -33,6 +33,7 @@ entity QpixEndeavorRx is
       -- Byte data received
       rxByte      : out std_logic_vector(NUM_BITS_G-1 downto 0);
       rxByteValid : out std_logic;
+      rxState     : out std_logic_vector(2 downto 0);
       rx          : in  std_logic
    );
 end QpixEndeavorRx;
@@ -44,6 +45,7 @@ architecture Behavioral of QpixEndeavorRx is
    type RegType is record
       state     : StateType;
       byte      : std_logic_vector(NUM_BITS_G-1 downto 0);
+      dataOut   : std_logic_vector(NUM_BITS_G-1 downto 0);
       byteValid : std_logic;
       lowCnt    : unsigned(7 downto 0);
       highCnt   : unsigned(7 downto 0);
@@ -56,6 +58,7 @@ architecture Behavioral of QpixEndeavorRx is
    constant REG_INIT_C : RegType := (
       state     => IDLE_S,
       byte      => (others => '0'),
+      dataOut   => (others => '0'),
       byteValid => '0',
       lowCnt  => (others => '0'),
       highCnt  => (others => '0'),
@@ -78,11 +81,19 @@ architecture Behavioral of QpixEndeavorRx is
 begin
 
    -- Map to outputs
-   rxByte      <= curReg.byte;
+   rxByte      <= curReg.dataOut;
    rxByteValid <= curReg.byteValid;
    bitError    <= curReg.bitError;
    gapError    <= curReg.gapError;
    lenError    <= curReg.lenError;
+
+   with curReg.state select rxState <=
+        "000" when IDLE_S,   -- off
+        "000" when DATA_S,   -- off (was red, confirmed to be working and only visible one)
+        "010" when BIT_S,    -- blue
+        "100" when GAP_S,    -- green
+        "001" when FINISH_S, -- off
+        "000" when others;   -- off
 
    process (clk)
    begin
@@ -93,7 +104,7 @@ begin
    rx_r <= rx_q(3);
 
    -- Asynchronous state logic
-   process(all) 
+   process(curReg, rx_r) 
    begin
       -- Set defaults
       nxtReg <= curReg;
@@ -101,8 +112,8 @@ begin
       -- Default strobe signals are '0'
       nxtReg.byteValid <= '0';
       nxtReg.bitError  <= '0';
-      nxtReg.gapError  <= '0';
-      nxtReg.lenError  <= '0';
+      --nxtReg.gapError  <= '0';
+      --nxtReg.lenError  <= '0';
 
       if rx_r = '1' then
          nxtReg.highCnt <= curReg.highCnt + 1;
@@ -131,16 +142,12 @@ begin
             elsif curReg.highCnt >= N_ONE_MIN_G and curReg.highCnt <= N_ONE_MAX_G then
                nxtReg.byte(to_integer(curReg.byteCount)) <= '1';
                nxtReg.state  <= GAP_S;
-            else 
-               -- error
+            else -- error
                nxtReg.bitError <= '1';
                nxtReg.state  <= IDLE_S;
             end if;
-
-            nxtReg.byteCount <= curReg.byteCount + 1;
-            
+            nxtReg.byteCount <= curReg.byteCount + 1;           
             nxtReg.highCnt <= (others => '0');
-
 
          when GAP_S =>
 
@@ -160,8 +167,13 @@ begin
 
          when FINISH_S  =>
             if to_integer(curReg.byteCount) = NUM_BITS_G then
+               nxtReg.dataOut   <= curReg.byte;
                nxtReg.byteValid <= '1';
+               nxtReg.lenError  <= '0';
+               nxtReg.gapError  <= '0';
             else 
+               -- temporarily send a bad byte just to see what we're reading if we've made it this far
+               --nxtReg.byteValid <= '1';
                nxtReg.lenError  <= '1';
             end if;
             nxtReg.state <= IDLE_S;

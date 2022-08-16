@@ -34,7 +34,7 @@ class AsicREG(Enum):
     DIR = 3
     # special address where both data will be written over the top of addr
     CAL = 4
-    # enable addr, write only
+    # enable addr
     ENA = 5
 
 def MemAddr(evt, pos):
@@ -63,7 +63,6 @@ def MemAddr(evt, pos):
 
     # full address here
     return evtMask + event + pos
-
 
 def AsicAddr(xpos=0, ypos=0, remote_addr=AsicREG.CMD):
     """
@@ -138,6 +137,11 @@ class AsicEnable(Enum):
     ALL = 0x7 # enables analog data in all situations
     OFF = 0x0 # disables analog data
 
+    # combination states
+    SND_RCV = 0x3
+    SND_REG = 0x5
+    RCV_REG = 0x6
+
 
 class REG(Enum):
     """
@@ -209,13 +213,14 @@ class qdb_interface(QObject):
 
         # create the tcp socket
         self._tcpsocket = QTcpSocket(self)
-        self._connect()
+        connected = self._connect()
 
-        # connect the write command to reading if anything comes back
-        self._tcpsocket.readyRead.connect(lambda: self._readData())
+        if connected:
+            # connect the write command to reading if anything comes back
+            self._tcpsocket.readyRead.connect(lambda: self._readData())
 
-        # make sure to check this works
-        self._verify()
+            # make sure to check this works
+            self._verify()
 
     def regRead(self, addr=REG) -> int:
         """
@@ -334,17 +339,21 @@ class qdb_interface(QObject):
         connect to the remote socket and find the zybo board.
         """
         print("..conecting..", end=" ")
+        connected = False
         try:
             addr = QHostAddress(self._QP_IP)
             self._tcpsocket.connectToHost(addr, self._QP_PORT)
             if self._tcpsocket.waitForConnected(1000):
                 print("connected..")
+                connected = True
             else:
                 print("not connected..")
 
         except Exception as ex:
             print(ex)
             print("unconnected!")
+
+        return connected
 
 if __name__ == '__main__':
     qpi = qdb_interface()

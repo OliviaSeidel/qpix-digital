@@ -35,7 +35,6 @@ def PrintFifoInfo(asic):
   for remoteFifo in asic._remoteFifos:
     print(f'{remoteFifo._totalWrites} ', end="")
   print('\n')
-##
 
 class QPExcpetion(Exception):
   pass
@@ -186,8 +185,8 @@ class QPFifo:
       current number of events stored in the FIFO
     """
 
-    # if not isinstance(data, QPByte):
-      # raise QPException("Can not add this data-type to a QPFifo!")
+    if not isinstance(data, QPByte):
+      raise QPException("Can not add this data-type to a QPFifo!")
 
     self._data.append(data)
     self._curSize += 1
@@ -554,7 +553,12 @@ class QPixAsic:
 
     then sort each according to time
     """
-    # print(f'injecting hits for ({self.row}, {self.col})')
+    if self._debugLevel > 0:
+      print(f'injecting {len(times)} hits for ({self.row}, {self.col})')
+
+    # don't try to extend anything if there are no times
+    if len(times) == 0:
+      return
 
     # place all of the injected times and channels into self._times and self._channels
     times = times.round(decimals=14)
@@ -566,8 +570,8 @@ class QPixAsic:
     # include default channels
     if channels is None:
       channels = [[1,3,8]] * len(times)
-    else:
-      self._channels.extend(channels)
+
+    self._channels.extend(channels)
 
     #sort the times and channels
     #zip outputs tuples, so turn times and channels if more hits injected

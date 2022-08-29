@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 import random
 import math
 import time
+import numpy as np
 
 ## helper functions
 def MakeFifoBars(qparray):
@@ -170,12 +171,24 @@ def PrintTimes(qparray):
 def PrintTransactMap(qparray):
     print("Local Transmissions:")
     for i, asic in enumerate(qparray):
-        print(asic._localTransmissions, end=" ")
+        localWrites = asic._localFifo._totalWrites
+        print(localWrites, end=" ")
         if (i+1)%qparray._nrows == 0:
             print()
     print("Remote Transmissions:")
     for i, asic in enumerate(qparray):
-        print(asic._remoteTransmissions, end=" ")
+        remoteTransacts = 0
+        for remotefifo in asic._remoteFifos:
+            remoteTransacts += remotefifo._totalWrites
+        print(remoteTransacts, end=" ")
+        if (i+1)%qparray._nrows == 0:
+            print()
+    print("Remote Max Sizes:")
+    for i, asic in enumerate(qparray):
+        remoteMax = 0
+        for remotefifo in asic._remoteFifos:
+            remoteMax += remotefifo._maxSize
+        print(remoteMax, end=" ")
         if (i+1)%qparray._nrows == 0:
             print()
 
@@ -194,15 +207,22 @@ class QpixAsicArray():
       deltaT      - stepping interval for the simulation
       timeEpsilon - stepping time interval for simulation (default 1e-6)
       debug       - debug level, values >= 0 produce text output (default 0)
+      tiledf   - tuple of asic hits to load into the array, tile dataframe is created from radiogenicNB
     """
     def __init__(self, nrows, ncols, nPixs=16, fNominal=50e6, pctSpread=0.05, deltaT=1e-5, timeEpsilon=1e-6,
-                timeout=1.5e4, hitsPerSec = 20./1., debug=0.0):
+                timeout=1.5e4, hitsPerSec = 20./1., debug=0.0, tiledf=None):
+
+        # if we have a tiledf to construct an array, then the size is determined by the tile
+        if tiledf is not None:
+            self._nrows = tiledf["nrows"]
+            self._ncols = tiledf["ncols"]
+        else:
+            self._nrows = nrows
+            self._ncols = ncols
 
         # array parameters
         self._tickNow = 0
         self._timeNow = 0
-        self._nrows = nrows
-        self._ncols = ncols
         self._debugLevel = debug
         self._nPixs = nPixs
         self.fNominal = fNominal
@@ -224,6 +244,10 @@ class QpixAsicArray():
         self._asics[0][0].connections[3] = self._daqNode
 
         self._alert = 0
+
+        # load in hits if we're creating an array based on tiledf data
+        if tiledf is not None:
+            self._InjectHits(tiledf["hits"])
    
     def __iter__(self):
         '''returns iterable through the asics within the array'''
@@ -315,7 +339,6 @@ class QpixAsicArray():
         self._alert=0
         time = self._timeNow + interval
         readoutSteps = self._Command(time, command="Interrogate")
-
 
     def WriteAsicRegister(self, row, col, config, timeEnd=1e-3):
         """
@@ -431,6 +454,7 @@ class QpixAsicArray():
                         processed += 1
                         self._queue.AddQueueItem(*item)
         return processed
+
     def Route(self, route = None, timeout = 1.5e4):
         '''
         Defines the routing of the asics manually
@@ -439,7 +463,7 @@ class QpixAsicArray():
             snake - serpentine style, snakes through all asics before
                     remote data origin until (0,0)
         '''
-        if route == 'left':
+        if route.lower() == 'left':
             for asic in self:
                 if asic.row == 0: 
                     config = AsicConfig(AsicDirMask.West, timeout)
@@ -453,7 +477,7 @@ class QpixAsicArray():
                     config = AsicConfig(AsicDirMask.North, timeout)
                     config.ManRoute = True
                     self.WriteAsicRegister(asic.row, asic.col, config)
-        if route == 'snake':
+        if route.lower() == 'snake':
             for asic in self:
                 if not(asic.row%2 == 0) and asic.col == self._ncols-1:
                     config = AsicConfig(AsicDirMask.North, timeout)
@@ -474,6 +498,21 @@ class QpixAsicArray():
                     self.WriteAsicRegister(asic.row, asic.col, config)
         if route == None:
             pass
+
+    def _InjectHits(self, dataframeHits):
+        """
+        InjectHits reads in output from tiledf created in radiogenicNB.ipynb. 
+        Values that are read in
+
+        This function should be
+        ARGS:
+            dataframeHits : tuple which stores (asicX :int, asicY :int, times :list)
+        """
+        # store the asic times into the correct asic
+        for asicX, asicY, times in dataframeHits:
+            times = np.asarray(times)
+            self._asics[asicX][asicY].InjectHits(times)
+
 
 
 if __name__ == "__main__":

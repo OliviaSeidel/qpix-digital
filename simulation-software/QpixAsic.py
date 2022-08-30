@@ -73,12 +73,13 @@ class AsicConfig():
   determine enables, timeouts, and directional routing
   ARGS:
     frq - frequency of asic frequency, required to determine number of timeout clicks
-    timeout - number of ticks that an asic should undergo before leaving transmitRemote state
-    DirMask - directional mask
-    ManRoute - flag to enable manual routing, or use default routing
-    EnableSnd - enable send flag
-    EnableRcv - enable receive flag
-    EnableReg - enagle register flag
+    timeout    - number of ticks that an asic should undergo before leaving transmitRemote state
+    DirMask    - directional mask
+    ManRoute   - flag to enable manual routing, or use default routing
+    EnableSnd  - enable send flag
+    EnableRcv  - enable receive flag
+    EnableReg  - enagle register flag
+    EnablePush - Tell the ASIC to be in a "push" state, so that it sends hits immediately
   """
   DirMask: AsicDirMask
   timeout: int 
@@ -87,6 +88,8 @@ class AsicConfig():
   EnableRcv = True
   EnableReg = True
   something = False
+  # enable push, not on by default
+  EnablePush = False
 
 class QPByte:
   """
@@ -246,6 +249,8 @@ class ProcQueue:
   def __init__(self, procItem=None):
     self._curItem = procItem
     self._entries = 0
+    # keep track of how many items this has queue has processed
+    self.processed = 0
 
   def AddQueueItem(self, asic, dir, QPByte, inTime, command=None):
     '''
@@ -279,6 +284,7 @@ class ProcQueue:
   def PopQueue(self):
     if self._curItem is None:
         return None
+    self.processed += 1
     self._entries -= 1
     data = self._curItem
     self._curItem = self._curItem._nextItem
@@ -585,8 +591,8 @@ class QPixAsic:
     then write hits to local fifos
     """
     if not(len(self._times) ==  len(self._channels)):
-      print('times and channels not the same length - something has gone horribly wrong')
-    
+      print('WARNING: times and channels not the same length')
+
     if len(self._times):
       self._times = np.asarray(self._times)
       #index times and channels such that they are within last asic hit time and target time
@@ -641,8 +647,14 @@ class QPixAsic:
       self._command = None
       self._changeState(AsicState.TransmitLocal)
 
-    ## QPixRoute State machine
-    elif self.state == AsicState.Idle:
+    # if the ASIC is in a push state, check for any new hits, if so start sending them
+    elif self.config.EnablePush:
+      newHits = self._ReadHits(targetTime)
+      if newHits > 0:
+        self._changeState(AsicState.TransmitLocal)
+
+    ## QPixRoute State machine ##
+    if self.state == AsicState.Idle:
       return self._processMeasuringState(targetTime)
 
     elif self.state == AsicState.TransmitLocal:

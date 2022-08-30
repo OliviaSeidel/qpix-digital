@@ -221,7 +221,7 @@ def PrintTransactMap(qparray, silent=False):
     if not silent:
         print("Remote Transmissions:")
     for i, asic in enumerate(qparray):
-        remoteTransacts += asic._remoteFifo._totalWrites
+        remoteTransacts = asic._remoteFifo._totalWrites
         remoteT.append((asic.row, asic.col, remoteTransacts))
         if not silent:
             print(remoteTransacts, end=" ")
@@ -232,7 +232,7 @@ def PrintTransactMap(qparray, silent=False):
     if not silent:
         print("Remote Max Sizes:")
     for i, asic in enumerate(qparray):
-        rMax += asic._remoteFifo._maxSize
+        rMax = asic._remoteFifo._maxSize
         remoteMax.append((asic.row, asic.col, rMax))
         if not silent:
             print(rMax, end=" ")
@@ -433,7 +433,6 @@ class QpixAsicArray():
         """
 
         # add the initial broadcast to the queue
-        steps = 0
         if byte is None:
             ReqID = self._daqNode._reqID
             request = QPByte(AsicWord.REGREQ, None, None, timeStamp=self._tickNow, ReqID=ReqID)
@@ -442,53 +441,10 @@ class QpixAsicArray():
             request = byte
         self._queue.AddQueueItem(self[0][0], 3, request, self._timeNow, command=command)
 
-        while(self._timeNow < timeEnd):
+        # move the Array forward in time
+        self._Process(timeEnd)
 
-            for asic in self:
-                newProcessItems = asic.Process(self._timeNow - self._timeEpsilon)
-                if newProcessItems:
-                    self._alert = 1
-                    # print("WARNING: ASIC had things left to do at next major time step")
-                    for item in newProcessItems:
-                        recv += 1
-                        self._queue.AddQueueItem(*item)
-
-            while(self._queue.Length() > 0):
-
-                if self._debugLevel > 0:
-                    print(f"step-{steps} | time-{self._timeNow} | process size-{self._queue.Length()}")
-                    for asic in self:
-                        print(f"\t({asic.row}, {asic.col}): {asic.state} - {asic.relTicksNow}")
-
-                steps += 1
-                # pop the next simulation unit
-                nextItem = self._queue.PopQueue()
-                asic = nextItem.asic
-                direction = nextItem.dir
-                hitTime = nextItem.inTime
-                data = nextItem.QPByte
-                command = nextItem.command
-
-                # ASICs to catch up to this time, and to send data
-                p1 = self._ProcessArray(hitTime)
-
-                # ASIC to receive data
-                newProcessItems = asic.ReceiveByte(nextItem)
-                recv = 0
-                if newProcessItems:
-                    for item in newProcessItems:
-                        recv += 1
-                        self._queue.AddQueueItem(*item)
-
-                p2 = self._ProcessArray(hitTime)
-
-                # print(f"({asic.row},{asic.col}) from {direction} processed:", p1, recv, p2, f"items={self._queue.Length()}")
-                # input("")
-
-            self._timeNow += self._deltaT
-            self._tickNow += self._deltaTick
-
-        return steps
+        return self._queue.processed
 
     def _ProcessArray(self, nextTime):
         """
@@ -506,6 +462,78 @@ class QpixAsicArray():
                         processed += 1
                         self._queue.AddQueueItem(*item)
         return processed
+
+    def _Process(self, timeEnd):
+        """
+        Main logic function to move the all ASICs within the Array forward in
+        time to timeEnd.
+
+        ARGS:
+        timeEnd - 'absolute' time to move Array to. If Array is already at this
+                   time, this function will do nothing
+        """
+        steps = 0
+        while(self._timeNow < timeEnd):
+
+            for asic in self:
+                newProcessItems = asic.Process(self._timeNow - self._timeEpsilon)
+                if newProcessItems:
+                    self._alert = 1
+                    # print("WARNING: ASIC had things left to do at next major time step")
+                    for item in newProcessItems:
+                        self._queue.AddQueueItem(*item)
+
+            # process transactions
+            while(self._queue.Length() > 0):
+
+                if self._debugLevel > 0:
+                    print(f"step-{steps} | time-{self._timeNow} | process size-{self._queue.Length()}")
+                    for asic in self:
+                        print(f"\t({asic.row}, {asic.col}): {asic.state} - {asic.relTicksNow}")
+
+                # pop the next simulation unit
+                steps += 1
+                nextItem = self._queue.PopQueue()
+                asic = nextItem.asic
+                hitTime = nextItem.inTime
+
+                # ASICs to catch up to this time, and to send data
+                p1 = self._ProcessArray(hitTime)
+
+                # ASIC to receive data
+                newProcessItems = asic.ReceiveByte(nextItem)
+                if newProcessItems:
+                    for item in newProcessItems:
+                        self._queue.AddQueueItem(*item)
+
+                p2 = self._ProcessArray(hitTime)
+
+            self._timeNow += self._deltaT
+            self._tickNow += self._deltaTick
+
+    def SetPushState(self, enabled=True):
+        """
+        This function will send a ASIC configuration write to all ASICs
+        enabling the PushState
+        """
+        assert isinstance(enabled, bool), "must supply boolean state to enable to ASICs"
+
+        for asic in self:
+            config = asic.config
+            config.EnablePush = enabled
+            self.WriteAsicRegister(asic.row, asic.col, config)
+
+    def IdleFor(self, interval=0.5):
+        """
+        Function will move the array forward by this time. This is meant
+        to be a replacement for the Interrogate method while the ASICs are
+        in a push state.
+
+        ARGS:
+        interval - time in seconds to move the array forward
+        """
+        timeEnd = self._timeNow + interval
+        self._Process(timeEnd)
 
     def Route(self, route = None, timeout = 1.5e4):
         '''

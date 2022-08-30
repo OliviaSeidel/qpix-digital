@@ -23,17 +23,13 @@ def PrintFifoInfo(asic):
 
   print("\033[4m" + f"asic ({asic.row},{asic.col}) Remote Fifos (NESW)" + "\033[0m")
   print(f'  data: ', end="")
-  for remoteFifo in asic._remoteFifos:
-    print(f'{remoteFifo._data} ', end="")
+  print(f'{asic._remoteFifo._data} ', end="")
   print(f'\n  did it reach max capacity?: ', end="")
-  for remoteFifo in asic._remoteFifos:
-    print(f'{remoteFifo._full} ', end="")
+  print(f'{asic._remoteFifo._full} ', end="")
   print(f'\n  max size:', end="")
-  for remoteFifo in asic._remoteFifos:
-    print(f'{remoteFifo._maxSize} ', end="")
+  print(f'{asic._remoteFifo._maxSize} ', end="")
   print(f'\n  total writes: ', end="")
-  for remoteFifo in asic._remoteFifos:
-    print(f'{remoteFifo._totalWrites} ', end="")
+  print(f'{asic._remoteFifo._totalWrites} ', end="")
   print('\n')
 
 class QPExcpetion(Exception):
@@ -319,7 +315,7 @@ class QPixAsic:
   state_times   - list of tuples that store transition times of ASIC states based on the 
   ## Buffers
   _localFifo   - QPFifo class to manage Read and Write of local data
-  _remoteFifos - QPFifo list of four QPFifo class' to manage write of remote ASIC data / transactions
+  _remoteFifo  - QPFifo list of four QPFifo class' to manage write of remote ASIC data / transactions
   _rxFifos     - QPFifo list of four QPFifo class' to manage read of adjacent ASIC transactions
   connections  - list of pointers to adjacent asics
   """
@@ -355,9 +351,9 @@ class QPixAsic:
     self._reqID = -1
 
     # Queues / FIFOs
-    self._localFifo   = QPFifo(maxDepth=256)
-    self._remoteFifos = [QPFifo(maxDepth=256), QPFifo(maxDepth=256), QPFifo(maxDepth=256), QPFifo(maxDepth=256)]
-    self._rxFifo      = [QPFifo(maxDepth=2), QPFifo(maxDepth=2), QPFifo(maxDepth=2), QPFifo(maxDepth=2)]
+    self._localFifo  = QPFifo(maxDepth=256)
+    self._remoteFifo = QPFifo(maxDepth=256)
+    self._rxFifo     = [QPFifo(maxDepth=2), QPFifo(maxDepth=2), QPFifo(maxDepth=2), QPFifo(maxDepth=2)]
 
     # additional / debug
     self._debugLevel = debugLevel
@@ -395,8 +391,7 @@ class QPixAsic:
     print("STATE:"+str(self.state),end=' ')
     print(f"locFifoSize: {self._localFifo._curSize}")
     print("Remote Sizes (N,E,S,W):",end=' ')
-    for d in range(4):
-      print(str(self._remoteFifos[d]._curSize) + ",",end=' ')
+    print(str(self._remoteFifo._curSize) + ",",end=' ')
     print(f"absTime = {self._absTimeNow:0.2e}, trel = {self.relTimeNow:0.2e}")
     print(f"ticks = {self.relTicksNow}")
 
@@ -480,7 +475,7 @@ class QPixAsic:
 
     # all data that is not a register request gets stored on remote fifos
     else:
-      self._remoteFifos[inDir].Write(inByte)
+      self._remoteFifo.Write(inByte)
 
     return outList
 
@@ -733,9 +728,8 @@ class QPixAsic:
       return []
 
     hitsToForward = False
-    for remote_fifo in self._remoteFifos:
-      if remote_fifo._curSize > 0:
-        hitsToForward = True
+    if self._remoteFifo._curSize > 0:
+      hitsToForward = True
 
     # If there's nothing to forward, just bring us up to requested time
     if not(hitsToForward):
@@ -746,17 +740,16 @@ class QPixAsic:
 
     else:
       hitlist = []
-      for remote_fifo in self._remoteFifos:
-        hit = remote_fifo.Read()
-        if hit is not None:
-          completeTime = self._absTimeNow + self.transferTime
-          if self._absTimeNow - self.timeoutStart > self.config.timeout / self.fOsc:
-            self.UpdateTime(completeTime)
-            self._changeState(AsicState.Idle)
-            return hitlist
-          else:
-            hitlist.append((self.connections[self.config.DirMask.value], (self.config.DirMask.value+2)%4 , hit, completeTime))
-            self.UpdateTime(completeTime)
+      hit = self._remoteFifo.Read()
+      if hit is not None:
+        completeTime = self._absTimeNow + self.transferTime
+        if self._absTimeNow - self.timeoutStart > self.config.timeout / self.fOsc:
+          self.UpdateTime(completeTime)
+          self._changeState(AsicState.Idle)
+          return hitlist
+        else:
+          hitlist.append((self.connections[self.config.DirMask.value], (self.config.DirMask.value+2)%4 , hit, completeTime))
+          self.UpdateTime(completeTime)
       return hitlist
 
     return []

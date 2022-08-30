@@ -212,8 +212,7 @@ print("MAX QUEUE DEPTHS")
 for i in range(0,nRows):
   for j in range(0,nCols):
     print(str(i)+" "+str(j)+" "+str(asicMatrix[i][j]._maxLocalDepth)+" ",end='')
-    for d in range(0,4):
-      print(str(asicMatrix[i][j]._remoteFifos[d]._maxSize)+" ",end='')
+    print(str(asicMatrix[i][j]._remoteFifo._maxSize)+" ",end='')
     print()
 
 print("PROCESSING TIMES")

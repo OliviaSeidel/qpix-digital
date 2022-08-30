@@ -30,7 +30,7 @@ def MakeFifoBars(qparray):
     fig, ax = plt.subplots(figsize = (8,8))
     DIRECTIONS = ("N", "E", "S", "W")
 
-    RemoteFifoMax = np.zeros((qparray._nrows * qparray._ncols, 4))
+    RemoteFifoMax = np.zeros(qparray._nrows * qparray._ncols)
     patches = []
 
     plt.xticks(
@@ -41,16 +41,46 @@ def MakeFifoBars(qparray):
     for i, asic in enumerate(qparray):
         locals() [f'patch{i}'] = mpatches.Patch(color=ColorWheelOfFun[i], label=f'Asic ({asic.row}, {asic.col})')
         patches.append(locals() [f'patch{i}'])
-        for d in range(4):
-            RemoteFifoMax[i, d] = asic._remoteFifos[d]._maxSize
-            if asic._remoteFifos[d]._full:
-                print(f'asic ({asic.row}, {asic.col}) {DIRECTIONS[d]} remote fifo full')
-            Nem = f'({asic.row}, {asic.col}) {DIRECTIONS[d]}'        
-            ax.bar(Nem, RemoteFifoMax[i, d], color=ColorWheelOfFun[i])
+        RemoteFifoMax[i] = asic._remoteFifo._maxSize
+        if asic._remoteFifo._full:
+            print(f'asic ({asic.row}, {asic.col}) remote fifo full')
+        Nem = f'({asic.row}, {asic.col})'        
+        ax.bar(Nem, RemoteFifoMax[i], color=ColorWheelOfFun[i])
     ax.set(ylabel='Max Sizes', title='Remote Fifo Maximum Sizes')
     ax.legend(handles=[*patches])
     plt.tight_layout()
     plt.show()
+
+def heatMap(data, rows, cols, header="", ax=None, cbarlabel="", cbar_kw={}, **kwargs):
+    """
+    modified heatmap function based on matplotlib docs
+    """
+
+    if ax is None:
+        print("getting ax")
+        ax = plt.gca()
+
+    im = ax.imshow(data, **kwargs)
+
+    # color bar
+    cbar = ax.figure.colorbar(im, ax=ax, **cbar_kw)
+    cbar.ax.set_ylabel(cbarlabel, rotation=-90, va="bottom")
+
+    ax.set_xticks(np.arange(cols))
+    ax.set_yticks(np.arange(rows))
+
+    ax.tick_params(top=True, bottom=False,
+                    labeltop=True, labelbottom=False)
+
+    # Loop over data dimensions and create text annotations.
+    for i in range(cols):
+        for j in range(rows):
+            text = ax.text(j, i, data[i][j],
+                        ha="center", va="center", color="w")
+
+    ax.set_title(f"{header}")
+
+    return im, cbar
 
 def viewAsicState(qparray, time_begin=-100e-9, time_end=300e-6):
     """
@@ -168,29 +198,49 @@ def PrintTimes(qparray):
         if (i+1)%qparray._nrows == 0:
             print()
 
-def PrintTransactMap(qparray):
-    print("Local Transmissions:")
+def PrintTransactMap(qparray, silent=False):
+    """
+    Helper function which iterates through a QPixArray and returns a dictionary of information
+    for the QPFifos for each asic within the Array.
+    """
+    dMap = {}
+    localT, remoteT, remoteMax = [], [], []
+
+    if not silent:
+        print(f"tile with route {tile.RouteState} Transmission map:")
+        print("Local Transmissions:")
     for i, asic in enumerate(qparray):
         localWrites = asic._localFifo._totalWrites
-        print(localWrites, end=" ")
-        if (i+1)%qparray._nrows == 0:
-            print()
-    print("Remote Transmissions:")
+        localT.append((asic.row, asic.col, localWrites))
+        if not silent:
+            print(localWrites, end=" ")
+            if (i+1)%qparray._nrows == 0:
+                print()
+    dMap["LocalT"] = localT
+
+    if not silent:
+        print("Remote Transmissions:")
     for i, asic in enumerate(qparray):
-        remoteTransacts = 0
-        for remotefifo in asic._remoteFifos:
-            remoteTransacts += remotefifo._totalWrites
-        print(remoteTransacts, end=" ")
-        if (i+1)%qparray._nrows == 0:
-            print()
-    print("Remote Max Sizes:")
+        remoteTransacts += asic._remoteFifo._totalWrites
+        remoteT.append((asic.row, asic.col, remoteTransacts))
+        if not silent:
+            print(remoteTransacts, end=" ")
+            if (i+1)%qparray._nrows == 0:
+                print()
+    dMap["RemoteT"] = remoteT
+
+    if not silent:
+        print("Remote Max Sizes:")
     for i, asic in enumerate(qparray):
-        remoteMax = 0
-        for remotefifo in asic._remoteFifos:
-            remoteMax += remotefifo._maxSize
-        print(remoteMax, end=" ")
-        if (i+1)%qparray._nrows == 0:
-            print()
+        rMax += asic._remoteFifo._maxSize
+        remoteMax.append((asic.row, asic.col, rMax))
+        if not silent:
+            print(rMax, end=" ")
+            if (i+1)%qparray._nrows == 0:
+                print()
+    dMap["RemoteMax"] = remoteMax
+
+    return dMap
 
 ## end helper functions
 
@@ -207,7 +257,8 @@ class QpixAsicArray():
       deltaT      - stepping interval for the simulation
       timeEpsilon - stepping time interval for simulation (default 1e-6)
       debug       - debug level, values >= 0 produce text output (default 0)
-      tiledf   - tuple of asic hits to load into the array, tile dataframe is created from radiogenicNB
+      tiledf      - tuple of asic hits to load into the array, tile dataframe is created from radiogenicNB
+      RouteState  - string or None type member to define current routing method of Array
     """
     def __init__(self, nrows, ncols, nPixs=16, fNominal=50e6, pctSpread=0.05, deltaT=1e-5, timeEpsilon=1e-6,
                 timeout=1.5e4, hitsPerSec = 20./1., debug=0.0, tiledf=None):
@@ -227,6 +278,7 @@ class QpixAsicArray():
         self._nPixs = nPixs
         self.fNominal = fNominal
         self.pctSpread = pctSpread
+        self.RouteState = None
 
         # the array also manages all of the processing queue times to use
         self._queue = ProcQueue()
@@ -463,7 +515,10 @@ class QpixAsicArray():
             snake - serpentine style, snakes through all asics before
                     remote data origin until (0,0)
         '''
-        if route.lower() == 'left':
+        self.RouteState = route
+        if route == None:
+            pass
+        elif route.lower() == 'left':
             for asic in self:
                 if asic.row == 0: 
                     config = AsicConfig(AsicDirMask.West, timeout)
@@ -477,7 +532,7 @@ class QpixAsicArray():
                     config = AsicConfig(AsicDirMask.North, timeout)
                     config.ManRoute = True
                     self.WriteAsicRegister(asic.row, asic.col, config)
-        if route.lower() == 'snake':
+        elif route.lower() == 'snake':
             for asic in self:
                 if not(asic.row%2 == 0) and asic.col == self._ncols-1:
                     config = AsicConfig(AsicDirMask.North, timeout)
@@ -496,8 +551,8 @@ class QpixAsicArray():
                     config = AsicConfig(AsicDirMask.East, timeout)
                     config.ManRoute = True
                     self.WriteAsicRegister(asic.row, asic.col, config)
-        if route == None:
-            pass
+        else:
+            print("WARNING: unknown route state passed!", self.RouteState)
 
     def _InjectHits(self, dataframeHits):
         """

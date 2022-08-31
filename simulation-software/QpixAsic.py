@@ -74,6 +74,8 @@ class AsicConfig():
   ARGS:
     frq - frequency of asic frequency, required to determine number of timeout clicks
     timeout    - number of ticks that an asic should undergo before leaving transmitRemote state
+    pTimeout    - number of ticks that an ASIC should undergo before
+                 automatically entering transmitLocal state if EnablePush == True
     DirMask    - directional mask
     ManRoute   - flag to enable manual routing, or use default routing
     EnableSnd  - enable send flag
@@ -83,6 +85,7 @@ class AsicConfig():
   """
   DirMask: AsicDirMask
   timeout: int 
+  pTimeout: int = int(25e6)
   ManRoute = False
   EnableSnd = True
   EnableRcv = True
@@ -316,6 +319,9 @@ class QPixAsic:
   col           - y position within array
   transferTicks - number of clock cycles governed in a transaction, which is determined by Endeavor protocol parameters
   debugLevel    - float flag which has print statements, > 0 values will cause prints
+  ## AsicConfig members
+  timeout       - clock cycles that ASIC will remote in transmit remote state
+  pTimeout      - clock cycles that ASIC will collect before entering transmit local state
   ## tracking params
   state         - AsicState Enum class, based on QpixRoute.vhd FSM states
   state_times   - list of tuples that store transition times of ASIC states based on the 
@@ -325,8 +331,8 @@ class QPixAsic:
   _rxFifos     - QPFifo list of four QPFifo class' to manage read of adjacent ASIC transactions
   connections  - list of pointers to adjacent asics
   """
-  def __init__(self, fOsc=50e6, nPixels=16, randomRate=20.0 / 1., timeout=1000, row=None, col=None,
-               isDaqNode = False, transferTicks=4*66, debugLevel=0):
+  def __init__(self, fOsc=50e6, nPixels=16, randomRate=20.0 / 1., timeout=15000, row=None, col=None,
+               isDaqNode = False, transferTicks=4*66, debugLevel=0, pTimeout=25e6):
     # basic asic parameters
     self.fOsc           = fOsc
     self.tOsc           = 1.0/fOsc
@@ -336,11 +342,11 @@ class QPixAsic:
     self.col            = col
     self.connections    = [None] * 4 
     self._command       = None
-    self._timeout = timeout
 
     # timing, absolute and relative with random starting phase
     self.timeoutStart   = 0
-    self.config         = AsicConfig(AsicDirMask.North, timeout)
+    self.pTimeoutStart  = 0
+    self.config         = AsicConfig(AsicDirMask.North, timeout, pTimeout)
     self.transferTicks  = transferTicks
     self.transferTime   = self.transferTicks * self.tOsc
     self.lastAbsHitTime = [0] * self.nPixels
@@ -562,24 +568,30 @@ class QPixAsic:
       return
 
     # place all of the injected times and channels into self._times and self._channels
-    times = times.round(decimals=14)
-    for ind, j in enumerate(times):
-      if j in self._times:
-        times[ind]+=self.tOsc
+    # times = times.round(decimals=14)
+    # for ind, j in enumerate(times):
+    #   if j in self._times:
+    #     times[ind]+=self.tOsc
+    if not isinstance(self._times, list):
+      self._times = list(self._times)
     self._times.extend(times)
    
     # include default channels
     if channels is None:
       channels = [[1,3,8]] * len(times)
-
+    assert(len(channels) == len(times)), "Injected Times and Channels must be same length"
+    if not isinstance(self._channels, list):
+      self._channels = list(self._channels)
     self._channels.extend(channels)
 
     #sort the times and channels
     #zip outputs tuples, so turn times and channels if more hits injected
-    self._times, self._channels = zip(*sorted(zip(self._times, self._channels)))
-    self._times = [*self._times]
-    self._channels = [*self._channels]
-    
+    times, channels = zip(*sorted(zip(self._times, self._channels)))
+
+    # construct the channel byte here, once
+    self._channels = np.array([np.sum([0x1 << ch for ch in c]) for c in channels])
+    self._times = np.array(times)
+
   def _ReadHits(self, targetTime):
     """
     make times and channels arrays to contain all hits within the last asic hit
@@ -590,32 +602,27 @@ class QPixAsic:
 
     then write hits to local fifos
     """
-    if not(len(self._times) ==  len(self._channels)):
-      print('WARNING: times and channels not the same length')
+    # if not(len(self._times) ==  len(self._channels)):
+    #   print('WARNING: times and channels not the same length')
 
-    if len(self._times):
-      self._times = np.asarray(self._times)
+    if len(self._times) > 0:
       #index times and channels such that they are within last asic hit time and target time
       TimesIndex = np.logical_and(self._times > self._lastAsicHitTime, self._times <= targetTime)
-      times = self._times[TimesIndex]
-      channels = []
-      for i in range(len(self._channels)):
-        if TimesIndex[i]:
-          channels.append(self._channels[i])
-      
+      readTimes = self._times[TimesIndex]
+      readChannels = self._channels[TimesIndex]
+
       newhitcount = 0
-      for inTime, ch in zip(times, channels):
-        if type(ch) is list:
-          prevByte = QPByte(AsicWord.DATA, self.row, self.col, inTime, [ch[0]])
-          for addCh in ch[1:]:
-            prevByte.AddChannel(addCh)
-        else:
-          prevByte = QPByte(AsicWord.DATA, self.row, self.col, inTime, [ch])
+      for inTime, ch in zip(readTimes, readChannels):
+        prevByte = QPByte(AsicWord.DATA, self.row, self.col, inTime, [])
+        prevByte.channelMask = ch
         self._localFifo.Write(prevByte)
         newhitcount+=1
       
         self._lastAsicHitTime = targetTime
-      self._times = [*self._times]
+
+      # the times and channels we have are everything else that's left
+      self._times = self._times[~TimesIndex]
+      self._channels = self._channels[~TimesIndex]
 
       return newhitcount
     
@@ -649,8 +656,9 @@ class QPixAsic:
 
     # if the ASIC is in a push state, check for any new hits, if so start sending them
     elif self.config.EnablePush:
-      newHits = self._ReadHits(targetTime)
-      if newHits > 0:
+      if self._absTimeNow - self.pTimeoutStart > self.config.pTimeout / self.fOsc:
+        self.pTimeoutStart = targetTime
+        self._ReadHits(targetTime)
         self._changeState(AsicState.TransmitLocal)
 
     ## QPixRoute State machine ##
@@ -813,6 +821,7 @@ class DaqNode(QPixAsic):
     inTime    = queueItem.inTime
     inCommand = queueItem.command
     inWord    = inByte.wordType
+    self.daqHits += 1
 
     # how a DAQNode records and stores data to its local FIFO
     AsicKey = f"({inByte.originRow}, {inByte.originCol})"
@@ -820,7 +829,6 @@ class DaqNode(QPixAsic):
       self.daqData[AsicKey] = []
 
     self.UpdateTime(queueItem.inTime)
-    self.daqHits += 1
     self._localFifo.Write(inByte)
 
     # Put all of the attributes of the QPByte into a list 

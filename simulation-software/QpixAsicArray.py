@@ -207,7 +207,7 @@ def PrintTransactMap(qparray, silent=False):
     localT, remoteT, remoteMax = [], [], []
 
     if not silent:
-        print(f"tile with route {tile.RouteState} Transmission map:")
+        print(f"tile with route {qparray.RouteState} Transmission map:")
         print("Local Transmissions:")
     for i, asic in enumerate(qparray):
         localWrites = asic._localFifo._totalWrites
@@ -473,13 +473,13 @@ class QpixAsicArray():
                    time, this function will do nothing
         """
         steps = 0
+        PROCITEM = 0
         while(self._timeNow < timeEnd):
 
             for asic in self:
                 newProcessItems = asic.Process(self._timeNow - self._timeEpsilon)
                 if newProcessItems:
                     self._alert = 1
-                    # print("WARNING: ASIC had things left to do at next major time step")
                     for item in newProcessItems:
                         self._queue.AddQueueItem(*item)
 

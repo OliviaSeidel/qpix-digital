@@ -656,9 +656,10 @@ class QPixAsic:
 
     # if the ASIC is in a push state, check for any new hits, if so start sending them
     elif self.config.EnablePush:
-      if self._absTimeNow - self.pTimeoutStart > self.config.pTimeout / self.fOsc:
+      newHits =  self._ReadHits(targetTime)
+      # if self._absTimeNow - self.pTimeoutStart > self.config.pTimeout / self.fOsc:
+      if newHits > 0:
         self.pTimeoutStart = targetTime
-        self._ReadHits(targetTime)
         self._changeState(AsicState.TransmitLocal)
 
     ## QPixRoute State machine ##

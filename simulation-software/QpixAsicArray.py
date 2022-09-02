@@ -27,8 +27,24 @@ def MakeFifoBars(qparray):
     plt.ylabel('Max Sizes')
     plt.show()
 
+    ## remote fifo current sizes
+    ColorWheelOfFun = ["#"+''.join([random.choice('0123456789ABCDEF') for i in range(6)])
+        for j in range(qparray._nrows * qparray._ncols)]
+
+    remoteFifoCur = np.zeros((qparray._nrows * qparray._ncols))
+    Names = []
+    for i, asic in enumerate(qparray):
+        remoteFifoCur[i] = asic._remoteFifo._curSize
+        Names.append(f'({asic.row}, {asic.col})')
+        if asic._localFifo._full:
+            print(f'asic ({asic.row}, {asic.col}) local fifo was full')
+
+    plt.bar(Names, remoteFifoCur, color=ColorWheelOfFun)
+    plt.title('Remote Fifo Current Sizes')
+    plt.ylabel('Cur Sizes')
+    plt.show()
+
     fig, ax = plt.subplots(figsize = (8,8))
-    DIRECTIONS = ("N", "E", "S", "W")
 
     RemoteFifoMax = np.zeros(qparray._nrows * qparray._ncols)
     patches = []
@@ -47,7 +63,8 @@ def MakeFifoBars(qparray):
         Nem = f'({asic.row}, {asic.col})'        
         ax.bar(Nem, RemoteFifoMax[i], color=ColorWheelOfFun[i])
     ax.set(ylabel='Max Sizes', title='Remote Fifo Maximum Sizes')
-    ax.legend(handles=[*patches])
+    if len(patches) < 10:
+        ax.legend(handles=[*patches])
     plt.tight_layout()
     plt.show()
 
@@ -259,6 +276,7 @@ class QpixAsicArray():
       debug       - debug level, values >= 0 produce text output (default 0)
       tiledf      - tuple of asic hits to load into the array, tile dataframe is created from radiogenicNB
       RouteState  - string or None type member to define current routing method of Array
+      push_state  - enable flag that is sent to ASICs within the array enabling push
     """
     def __init__(self, nrows, ncols, nPixs=16, fNominal=50e6, pctSpread=0.05, deltaT=1e-5, timeEpsilon=1e-6,
                 timeout=1.5e4, hitsPerSec = 20./1., debug=0.0, tiledf=None):
@@ -279,6 +297,7 @@ class QpixAsicArray():
         self.fNominal = fNominal
         self.pctSpread = pctSpread
         self.RouteState = None
+        self.push_state = False
 
         # the array also manages all of the processing queue times to use
         self._queue = ProcQueue()
@@ -323,10 +342,7 @@ class QpixAsicArray():
         for i in range(self._nrows):
             for j in range(self._ncols):
                 frq = random.gauss(self.fNominal,self.fNominal*self.pctSpread)
-                # frq = [48141619.19, 49670982.15, 49863841.62, 50478983.94]
-                # frq = [48141619.19, 50670982.15, 47863841.62, 50478983.94]
 
-                # matrix[i].append(QPixAsic(frq[i+2*j], self._nPixs, row=i, col=j, debugLevel=self._debugLevel, timeout=timeout))
                 matrix[i].append(QPixAsic(frq, self._nPixs, row=i, col=j, debugLevel=self._debugLevel, timeout=timeout, randomRate=randomRate))
                 
                 if self._debugLevel > 0:
@@ -511,17 +527,22 @@ class QpixAsicArray():
             self._timeNow += self._deltaT
             self._tickNow += self._deltaTick
 
-    def SetPushState(self, enabled=True):
+    def SetPushState(self, enabled=True, transact=False):
         """
         This function will send a ASIC configuration write to all ASICs
         enabling the PushState
         """
         assert isinstance(enabled, bool), "must supply boolean state to enable to ASICs"
 
+        self.push_state = enabled
+
         for asic in self:
             config = asic.config
             config.EnablePush = enabled
-            self.WriteAsicRegister(asic.row, asic.col, config)
+            if transact:
+                self.WriteAsicRegister(asic.row, asic.col, config)
+            else:
+                asic.config = config
 
     def IdleFor(self, interval=0.5):
         """
@@ -535,50 +556,54 @@ class QpixAsicArray():
         timeEnd = self._timeNow + interval
         self._Process(timeEnd)
 
-    def Route(self, route = None, timeout = 1.5e4):
+    def Route(self, route=None, timeout=None, transact=True):
         '''
         Defines the routing of the asics manually
-            left - routes all of the remote information to the left most asics
+        ARGS:
+        -- 
+        Route: string->
+            left  - routes all of the remote information to the left most asics
                     then moves all data to (0,0)
             snake - serpentine style, snakes through all asics before
                     remote data origin until (0,0)
+        --
+        transact: bool, if true (default) will simulate daq node transactions
+                        if false, will automagically update asic configs
         '''
         self.RouteState = route
+        if timeout is None:
+            timeout = self[0][0].config.timeout
         if route == None:
-            pass
+            return
         elif route.lower() == 'left':
             for asic in self:
                 if asic.row == 0: 
                     config = AsicConfig(AsicDirMask.West, timeout)
-                    config.ManRoute = True
-                    self.WriteAsicRegister(asic.row, asic.col, config)
                 elif not(asic.col == 0):
                     config = AsicConfig(AsicDirMask.West, timeout)
-                    config.ManRoute = True
-                    self.WriteAsicRegister(asic.row, asic.col, config)
                 else:
                     config = AsicConfig(AsicDirMask.North, timeout)
-                    config.ManRoute = True
+                config.ManRoute = True
+                if transact:
                     self.WriteAsicRegister(asic.row, asic.col, config)
+                else:
+                    asic.config = config
         elif route.lower() == 'snake':
             for asic in self:
                 if not(asic.row%2 == 0) and asic.col == self._ncols-1:
                     config = AsicConfig(AsicDirMask.North, timeout)
-                    config.ManRoute = True
-                    self.WriteAsicRegister(asic.row, asic.col, config)
                 elif asic.row%2 == 0:
                     if asic.col == 0 and not(asic.row == 0):
                         config = AsicConfig(AsicDirMask.North, timeout)
-                        config.ManRoute = True
-                        self.WriteAsicRegister(asic.row, asic.col, config)
-                        continue
-                    config = AsicConfig(AsicDirMask.West, timeout)
-                    config.ManRoute = True
-                    self.WriteAsicRegister(asic.row, asic.col, config)
+                    else:
+                        config = AsicConfig(AsicDirMask.West, timeout)
                 else:
                     config = AsicConfig(AsicDirMask.East, timeout)
-                    config.ManRoute = True
+                config.ManRoute = True
+                if transact:
                     self.WriteAsicRegister(asic.row, asic.col, config)
+                else:
+                    asic.config = config
         else:
             print("WARNING: unknown route state passed!", self.RouteState)
 

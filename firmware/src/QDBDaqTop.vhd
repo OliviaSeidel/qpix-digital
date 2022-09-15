@@ -7,8 +7,8 @@ library work;
 use work.QpixPkg.all;
 use work.QpixProtoPkg.all;
 
---library UNISIM;
---use UNISIM.VComponents.all;
+library UNISIM;
+use UNISIM.VComponents.all;
 
 entity QDBDaqTop is
    generic (
@@ -27,10 +27,19 @@ port (
    led5_b : out std_logic;
    led5_g : out std_logic;
 
+   -- led_6
+   led6_r : out std_logic;
+   led6_b : out std_logic;
+   led6_g : out std_logic;
+
    -- I/O ports
    je    : out STD_LOGIC_VECTOR(3 downto 0);
    DaqTx : out STD_LOGIC;
    DaqRx : in  STD_LOGIC;
+   -- SAQ I/O
+--   jbp : in std_logic_vector(3 downto 0);
+--   jbn : in std_logic_vector(3 downto 0);
+   Saq : in STD_LOGIC;
 
    -- PS ports
    DDR_addr          : inout STD_LOGIC_VECTOR (14 downto 0);
@@ -68,30 +77,37 @@ architecture Behavioral of QDBDaqTop is
    signal axi_resetn  : std_logic_vector(0 downto 0) := (others => '1');
    signal axi_awaddr  : std_logic_vector (31 downto 0);
    signal axi_awprot  : std_logic_vector (2 downto 0);
-   signal axi_awvalid : std_logic;
-   signal axi_awready : std_logic;
+   signal axi_awvalid : std_logic_vector(0 downto 0);
+   signal axi_awready : std_logic_vector(0 downto 0);
    signal axi_wdata   : std_logic_vector (31 downto 0);
    signal axi_wstrb   : std_logic_vector (3 downto 0);
-   signal axi_wvalid  : std_logic;
-   signal axi_wready  : std_logic;
+   signal axi_wvalid  : std_logic_vector(0 downto 0);
+   signal axi_wready  : std_logic_vector(0 downto 0);
    signal axi_bresp   : std_logic_vector (1 downto 0);
-   signal axi_bvalid  : std_logic;
-   signal axi_bready  : std_logic;
+   signal axi_bvalid  : std_logic_vector(0 downto 0);
+   signal axi_bready  : std_logic_vector(0 downto 0);
    signal axi_araddr  : std_logic_vector (31 downto 0);
    signal axi_arprot  : std_logic_vector (2 downto 0);
-   signal axi_arvalid : std_logic;
-   signal axi_arready : std_logic;
+   signal axi_arvalid : std_logic_vector(0 downto 0);
+   signal axi_arready : std_logic_vector(0 downto 0);
    signal axi_rdata   : std_logic_vector (31 downto 0);
    signal axi_rresp   : std_logic_vector (1 downto 0);
-   signal axi_rvalid  : std_logic;
-   signal axi_rready  : std_logic;
-
+   signal axi_rvalid  : std_logic_vector(0 downto 0);
+   signal axi_rready  : std_logic_vector(0 downto 0);
+   
+   -- Register signals
    signal reg_addr    : std_logic_vector (31 downto 0);
    signal reg_rdata   : std_logic_vector (31 downto 0);
    signal reg_wdata   : std_logic_vector (31 downto 0);
    signal reg_req     : std_logic := '0';
    signal reg_wen     : std_logic := '0';
    signal reg_ack     : std_logic := '0';
+
+   -- ps axi4-stream data fifo
+   signal S_AXI_0_tlast   : STD_LOGIC;
+   signal S_AXI_0_tdata  : STD_LOGIC_VECTOR (31 downto 0);
+   signal S_AXI_0_tready : STD_LOGIC;
+   signal S_AXI_0_tvalid : STD_LOGIC;
 
    -- signal inPortsArr  : QpixInPortsArrType(0 to X_NUM_G-1, 0 to Y_NUM_G-1);
    signal hitMask     : Sl2DArray ;
@@ -131,11 +147,51 @@ architecture Behavioral of QDBDaqTop is
    signal pulse_gre    : std_logic                    := '0';
    constant pulse_time : integer                      := 2_999_999;  -- fclk_freq / pulse_time = pulse's width
 
+   -- SAQ signals / Constants
+   constant N_SAQ_PORTS    : natural   := 15;
+   constant TIMESTAMP_BITS : natural   := 32;
+   signal saqMask          : std_logic_vector(N_SAQ_PORTS - 1 downto 0);
+   signal saqPacketLength  : std_logic_vector(31 downto 0);
+   signal saqEnable        : std_logic := '0';
+   signal saqPortData      : std_logic_vector(N_SAQ_PORTS - 1 downto 0);
+   signal saq_fifo_data    : std_logic_vector(63 downto 0);
+   signal saq_fifo_valid   : std_logic := '0';
+   signal saq_fifo_empty   : std_logic := '0';
+   signal saq_fifo_full    : std_logic := '0';
+   signal saq_fifo_ren     : std_logic := '0';
+   signal saq_fifo_hits    : std_logic_vector(31 downto 0);
+   signal pulse_red6    : std_logic                    := '0';
+   signal pulse_blu6    : std_logic                    := '0';
+   signal pulse_gre6    : std_logic                    := '0';
+
+
+   -- pulse LED procedure
+   procedure pulseLED(variable flag : in boolean;
+                      variable start_pulse : inout std_logic;
+                      variable count_pulse : inout integer;
+                      signal output : out std_logic) is
+      begin
+         if flag then
+             start_pulse := '1';
+             count_pulse := 0;
+         end if;
+         if start_pulse = '1' then
+             count_pulse := count_pulse + 1;
+             output <= '1';
+             if count_pulse >= pulse_time then
+                 output      <= '0';
+                 count_pulse := 0;
+                 start_pulse := '0';
+             end if;
+         end if;
+      end procedure pulseLED;
+
+
 begin
 
     -- connect the switches to the LEDs
     -- led <= sw;
-    je(0) <= fclk;
+    je <= sw;
     -- je(1) <= sw(1); -- direct pin or switch 
     DaqTx <= s_daqTx;
     s_daqRx <= DaqRx;   
@@ -146,6 +202,22 @@ begin
    led5_r <= pulse_red;
    led5_b <= pulse_blu;
    led5_g <= pulse_gre;
+
+   led6_r <= pulse_red6;
+   led6_b <= pulse_blu6;
+   led6_g <= pulse_gre6;
+   
+--   saq_assn: for i in 3 downto 0 generate
+--    IBUFDS_inst : IBUFDS
+--    port map (
+--        O => saqPortData(i),   -- 1-bit output: Buffer output
+--        I => jbp(i),   -- 1-bit input: Diff_p buffer input (connect directly to top-level port)
+--        IB => jbn(i)  -- 1-bit input: Diff_n buffer input (connect directly to top-level port)
+--    );
+--    end generate;
+    saqPortData(N_SAQ_PORTS - 1 downto 1) <= "00000000000000"; 
+    saqPortData(0) <= Saq;
+    
     
     counter: process(fclk, rst) is
         constant count : natural := 12000000;
@@ -217,6 +289,15 @@ begin
             M_AXI_0_rresp             => axi_rresp,  
             M_AXI_0_rvalid            => axi_rvalid, 
             M_AXI_0_rready            => axi_rready, 
+
+            -- data fifo interface for SAQ
+            S_AXIS_0_tdata   => S_AXI_0_tdata,
+            S_AXIS_0_tready  => S_AXI_0_tready,
+            S_AXIS_0_tlast   => S_AXI_0_tlast,
+            S_AXIS_0_tvalid  => S_AXI_0_tvalid,
+            S_AXIS_0_tkeep   => "1111",
+
+            -- clk + rst
             aresetn                   => axi_resetn,
             fclk                      => fclk, 
 
@@ -239,23 +320,23 @@ begin
 
          axi_awaddr            => axi_awaddr,
          axi_awprot            => axi_awprot, 
-         axi_awvalid           => axi_awvalid,
-         axi_awready           => axi_awready,
+         axi_awvalid           => axi_awvalid(0),
+         axi_awready           => axi_awready(0),
          axi_wdata             => axi_wdata,  
          axi_wstrb             => axi_wstrb,  
-         axi_wvalid            => axi_wvalid, 
-         axi_wready            => axi_wready, 
+         axi_wvalid            => axi_wvalid(0),
+         axi_wready            => axi_wready(0),
          axi_bresp             => axi_bresp,  
-         axi_bvalid            => axi_bvalid, 
-         axi_bready            => axi_bready, 
+         axi_bvalid            => axi_bvalid(0),
+         axi_bready            => axi_bready(0),
          axi_araddr            => axi_araddr, 
          axi_arprot            => axi_arprot, 
-         axi_arvalid           => axi_arvalid,
-         axi_arready           => axi_arready,
+         axi_arvalid           => axi_arvalid(0),
+         axi_arready           => axi_arready(0),
          axi_rdata             => axi_rdata,  
          axi_rresp             => axi_rresp,  
-         axi_rvalid            => axi_rvalid, 
-         axi_rready            => axi_rready, 
+         axi_rvalid            => axi_rvalid(0),
+         axi_rready            => axi_rready(0),
 
          addr                  => reg_addr, 
          rdata                 => reg_rdata,
@@ -269,9 +350,11 @@ begin
    ---------------------------------------------------
    QpixProtoRegMap_U : entity work.QpixProtoRegMap
    generic map (
-      X_NUM_G => X_NUM_G,
-      Y_NUM_G => Y_NUM_G,
-      Version => x"0000_0006"
+      X_NUM_G        => X_NUM_G,
+      Y_NUM_G        => Y_NUM_G,
+      Version        => x"0000_0009",
+      N_SAQ_PORTS    => N_SAQ_PORTS,
+      TIMESTAMP_BITS => TIMESTAMP_BITS
    )
    port map(
       clk          => fclk,
@@ -308,7 +391,18 @@ begin
       memRdReq     => memRdReq,
       memRdAck     => memRdAck,
       memData      => memDataOut,
-      memAddr      => memRdAddr
+      memAddr      => memRdAddr,
+
+      -- SAQ Node interactions
+      saqMask         => saqMask,
+      saqPacketLength => saqPacketLength,
+      saqEnable       => saqEnable,
+      saq_fifo_hits   => saq_fifo_hits,
+      saq_fifo_valid  => saq_fifo_valid,
+      saq_fifo_full   => saq_fifo_full,
+      saq_fifo_empty  => saq_fifo_empty,
+      saq_fifo_ren    => saq_fifo_ren,
+      saq_fifo_data   => saq_fifo_data
    );
 
    ---------------------------------------------------
@@ -349,61 +443,78 @@ begin
       
    memAddrRst <= trg or asicReq;
 
+   ---------------------------------------------------
+   -- SAQ node
+   ---------------------------------------------------
+  SAQNode_U : entity work.SAQNode
+   generic map(
+   N_SAQ_PORTS    => N_SAQ_PORTS,
+   TIMESTAMP_BITS => TIMESTAMP_BITS)
+   port map(
+      clk         => fclk,
+      rst         => rst,
+      saqPortData => saqPortData,
+      saqReadEn   => saq_fifo_ren,
+      saqDataOut  => saq_fifo_data,
+
+      -- AXI IO
+      S_AXI_0_tdata   => S_AXI_0_tdata,
+      S_AXI_0_tready  => S_AXI_0_tready,
+      S_AXI_0_tlast   => S_AXI_0_tlast,
+      S_AXI_0_tvalid  => S_AXI_0_tvalid,
+
+      -- Register Pins
+      valid           => saq_fifo_valid,
+      empty           => saq_fifo_empty,
+      full            => saq_fifo_full,
+      saqHits         => saq_fifo_hits,
+      saqMask         => saqMask,
+      saqPacketLength => saqPacketLength,
+      saqEnable       => saqEnable
+   );
  
  pulse : process (fclk, s_daqRx, s_daqTx) is
+     -- variable conditions
+     variable cr5 : boolean := false;
+     variable cb5 : boolean := false;
+     variable cg5 : boolean := false;
+     variable cr6 : boolean := false;
+     variable cb6 : boolean := false;
+     variable cg6 : boolean := false;
+     -- led5
      variable pulse_count_red : integer range 0 to pulse_time := 0;
      variable start_pulse_red : std_logic := '0';
      variable pulse_count_blu : integer range 0 to pulse_time := 0;
      variable start_pulse_blu : std_logic := '0';
      variable pulse_count_gre : integer range 0 to pulse_time := 0;
      variable start_pulse_gre : std_logic := '0';
+     -- LED6
+     variable pulse_count_red6 : integer range 0 to pulse_time := 0;
+     variable start_pulse_red6 : std_logic := '0';
+     variable pulse_count_blu6 : integer range 0 to pulse_time := 0;
+     variable start_pulse_blu6 : std_logic := '0';
+     variable pulse_count_gre6 : integer range 0 to pulse_time := 0;
+     variable start_pulse_gre6 : std_logic := '0';
  begin
      if rising_edge(fclk) then
-
-         -- pulse Red
-         if s_daqRx = '1' then
-             start_pulse_red := '1';
-             pulse_count_red := 0;
-         end if;
-         if start_pulse_red = '1' then
-             pulse_count_red := pulse_count_red + 1;
-             pulse_red <= '1';
-             if pulse_count_red >= pulse_time then
-                 pulse_red       <= '0';
-                 pulse_count_red := 0;
-                 start_pulse_red := '0';
-             end if;
-         end if;
-
-         -- pulse Blue
-         if s_daqTx = '1' then
-             start_pulse_blu := '1';
-             pulse_count_blu := 0;
-         end if;
-         if start_pulse_blu = '1' then
-             pulse_count_blu := pulse_count_blu + 1;
-             pulse_blu <= '1';
-             if pulse_count_blu >= pulse_time then
-                 pulse_blu       <= '0';
-                 pulse_count_blu := 0;
-                 start_pulse_blu := '0';
-             end if;
-         end if;
-
-       -- pulse Green
-       if evtSize /= x"0000_0000" then
-            start_pulse_gre := '1';
-            pulse_count_gre := 0;
-        end if;
-        if start_pulse_gre = '1' then
-            pulse_count_gre := pulse_count_gre + 1;
-            pulse_gre <= '1';
-            if pulse_count_gre >= pulse_time then
-                pulse_gre       <= '0';
-                pulse_count_gre := 0;
-                start_pulse_gre := '0';
-            end if;
-        end if;
+     
+       -- LED Flashing conditions
+        cr5 := s_daqRx = '1';
+        cg5 := evtSize /= x"0000_0000";
+        cb5 := s_daqTx = '1';
+              
+        cr6 := saq_fifo_full = '1';
+        cg6 := saq_fifo_empty = '1';
+        cb6 := saq_fifo_valid = '1';
+    
+        -- proc's RGB
+        pulseLED(cr5, start_pulse_red, pulse_count_red, pulse_red);
+        pulseLED(cb5, start_pulse_blu, pulse_count_blu, pulse_blu);
+        pulseLED(cg5, start_pulse_gre, pulse_count_gre, pulse_gre);
+        -- led6 RGB
+        pulseLED(cr6, start_pulse_red6, pulse_count_red6, pulse_red6);
+        pulseLED(cb6, start_pulse_blu6, pulse_count_blu6, pulse_blu6);
+        pulseLED(cg6, start_pulse_gre6, pulse_count_gre6, pulse_gre6);
 
      end if;
  end process pulse;

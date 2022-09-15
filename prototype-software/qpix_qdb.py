@@ -1,11 +1,12 @@
 # interfacing dependcies
-from qdb_interface import AsicREG, AsicCMD, AsicEnable, AsicMask, qdb_interface, QDBBadAddr, REG
+from qdb_interface import AsicREG, AsicCMD, AsicEnable, AsicMask, qdb_interface, QDBBadAddr, REG, SAQReg
 import sys
 import time
 
 # GUI things
 from PyQt5 import QtCore
-from PyQt5.QtWidgets import QWidget, QPushButton, QCheckBox, QSpinBox, QLabel, QDoubleSpinBox, QProgressBar
+from PyQt5.QtWidgets import (QWidget, QPushButton, QCheckBox, QSpinBox, QLabel,
+                             QDoubleSpinBox, QProgressBar, QStackedLayout)
 from PyQt5.QtCore import QProcess, QTimer
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QApplication, QMainWindow, QAction
@@ -37,7 +38,7 @@ class QPIX_GUI(QMainWindow):
             self._tt.Branch(data[0], data[1], typ)
 
         # window setup
-        self.setWindowTitle('QDB Viewer')
+        self.setWindowTitle('QPix Viewer')
 
         # main window
         self.main_wid = QWidget() # store the main layout
@@ -50,19 +51,22 @@ class QPIX_GUI(QMainWindow):
         self._clock.timeout.connect(self.trigger)
         self._lastTrig = -1
 
-        # progress tracker
-        pbar = QProgressBar(self.main_wid)
-        pbar.setRange(0, 100)
-        pbar.move(320,320)
-        pbar.setValue(50)
-        self._progBar = pbar
 
         # initialize the sub menus
         self._make_menuBar()
 
+        # create the layouts that are needed for making the GUI pretty
+
         ###################
         ## Zybo commands ##
         ###################
+        # progress tracker
+        pbar = QProgressBar(self.main_wid)
+        pbar.setRange(0, 100)
+        pbar.move(320,320)
+        pbar.setValue(0)
+        self._progBar = pbar
+
         btn_initialize = QPushButton(self.main_wid)
         btn_initialize.setText('initialize')
         btn_initialize.move(0,0)
@@ -123,9 +127,42 @@ class QPIX_GUI(QMainWindow):
         self.chk_enable.stateChanged.connect(self.enableAsic)
 
         ###################
+        ## SAQ commands  ##
+        ###################
+        btn_sScratch = QPushButton(self.main_wid)
+        btn_sScratch.setText('READ SAQ Scratch')
+        btn_sScratch.move(440, 0)
+        btn_sScratch.clicked.connect(self.getSAQScratch)
+
+        btn_sMask = QPushButton(self.main_wid)
+        btn_sMask.setText('Update SAQ Mask')
+        btn_sMask.move(440, 40)
+        btn_sMask.clicked.connect(self.setSAQMask)
+
+        btn_sFifo = QPushButton(self.main_wid)
+        btn_sFifo.setText('READ SAQ Fifo')
+        btn_sFifo.move(440, 80)
+        btn_sFifo.clicked.connect(self.getSAQFifo)
+
+        self.saq_enable = QCheckBox(self.main_wid)
+        self.saq_enable.setText('SAQ Enable')
+        self.saq_enable.setCheckState(0)
+        self.saq_enable.move(440, 120)
+        self.saq_enable.stateChanged.connect(self.enableSAQ)
+
+        btn_sDMA = QPushButton(self.main_wid)
+        btn_sDMA.setText('Print SMA Registers')
+        btn_sDMA.move(440, 160)
+        btn_sDMA.clicked.connect(self.getDMARegisters)
+
+        btn_sDMA = QPushButton(self.main_wid)
+        btn_sDMA.setText('Reset SMA Registers')
+        btn_sDMA.move(440, 200)
+        btn_sDMA.clicked.connect(self.resetDMA)
+
+        ###################
         ##  Containers  ###
         ###################
-        # nIntegrations
         sBox = QSpinBox(self.main_wid)
         sBox.move(240,0)
         sBox.setValue(1)
@@ -133,7 +170,6 @@ class QPIX_GUI(QMainWindow):
         lsBox = QLabel(self.main_wid)
         lsBox.setText("N-Integrations")
         lsBox.move(310, 5)
-        # lFrqs, like a np.arange
         sBox_frqStart = QSpinBox(self.main_wid)
         sBox_frqStart.move(240,40)
         sBox_frqStart.setValue(1)
@@ -164,6 +200,16 @@ class QPIX_GUI(QMainWindow):
         lsBox = QLabel(self.main_wid)
         lsBox.setText("time Iteration")
         lsBox.move(240, 205)
+
+        # SAQ Mask box
+        saqMaskBox = QSpinBox(self.main_wid)
+        saqMaskBox.move(400,45)
+        saqMaskBox.setValue(255)
+        saqMaskBox.setRange(0, 255)
+        self._saqMaskBox = saqMaskBox
+        masklsBox = QLabel(self.main_wid)
+        masklsBox.setText("Mask Value (Enable High)")
+        masklsBox.move(540, 45)
 
         # show the main window
         self.show()
@@ -334,7 +380,6 @@ class QPIX_GUI(QMainWindow):
             print("starting clock..")
             self._clock.start()
 
-
     def loopInterrogations(self, nInts: int, lFrqs: list):
         """
         function designed to loop through a interval set to test how quickly 
@@ -423,6 +468,112 @@ class QPIX_GUI(QMainWindow):
 
         return asicTimeout
 
+    def getAsicTime(self, xpos=0, ypos=0):
+        """
+        wrapper function for reading clkCnt register within QDBAsic, as defined
+        in QPixRegFile.vhd
+        """
+        addr = REG.ASIC(xpos, ypos, AsicREG.CAL)
+        read = self.qpi.regRead(addr)
+        x, y, wordType, timestamp = self._readAsicTime()
+
+        if x != xpos or y != ypos:
+            print(f"CAL WARNING: Read ({x}, {y}) instead of ({xpos},{ypos})")
+
+        return timestamp
+
+    def _readAsicTime(self):
+        """
+        helper function to parse data from the asic cal as stored in RegFile.vhd.
+
+        This method is similar to _readAsicTimeout.
+        """
+
+        # this register stores the whole stamp in the bottom 32 bits
+        timestamp = self.qpi.regRead(REG.MEM(0, 0))
+
+        # next 32 bits
+        word2 = self.qpi.regRead(REG.MEM(0, 1))
+        y = word2 & 0xf
+        x = (word2 >> 4) & 0xf
+        wordType = (word2 >> 24) & 0xf
+
+        return x, y, wordType, timestamp
+
+    ############################
+    ## SAQ specific Commands  ##
+    ############################
+    def getSAQScratch(self):
+        """
+        Function to read register from SAQ Scratch register
+        """
+        addr = REG.SAQ(SAQReg.SCRATCH)
+        read = self.qpi.regRead(addr)
+        print(f"read the value from addr {addr:08x}.. {read:08x}")
+
+    def setSAQMask(self):
+        """
+        issue register write to SAQ mask value
+        """
+        mask = self._saqMaskBox.value()
+
+        assert mask <= 255, "mask must have a value less than 8"
+
+        addr = REG.SAQ(SAQReg.MASK)
+        print(f"setting mask value: {mask}")
+        wrote = self.qpi.regWrite(addr, mask)
+
+    def getSAQFifo(self):
+        """
+        Main reading function to read the SAQ Fifo and store data where it needs
+        to go.
+        """
+        # flag REN to update buffer
+        if bool(self.qpi.regRead(REG.SAQ(SAQReg.READ_ENABLE))):
+            print("no new evts")
+            return
+
+        # read the two words off of the fifo:
+        print("reading evt")
+        timestamp = self.qpi.regRead(REG.SAQ(SAQReg.READ1))
+
+        saq_mask = self.qpi.regRead(REG.SAQ(SAQReg.READ2))
+
+        saq_mask = saq_mask & 0xff # mask is only bottom 8 bits
+
+    def enableSAQ(self):
+        """
+        read / write the single bit register at SaqEnable to turn on Axi Fifo streaming.
+        """
+        addr = REG.SAQ(SAQReg.SAQ_ENABLE)
+        if self.saq_enable.isChecked():
+            val = 1
+        else:
+            val = 0
+        self.qpi.regWrite(addr, val)
+
+    def getSAQHits(self):
+        """
+        read the SAQ Hit register buffer
+        """
+        addr = REG.SAQ(SAQReg.SAQ_N_HITS)
+        hits = self.qpi.regRead(addr)
+        print(f"SAQ currently has detected {hits} hits.")
+
+    def getDMARegisters(self):
+        """
+        Print the DMA register status, connected to a button
+        """
+        print("printing DMA Registers:")
+        self.qpi._configureDMA()
+
+    def resetDMA(self):
+        """
+        reset DMA by pinging the correct ctrl register
+        """
+        print("reseting the DMA!")
+        self.qpi._resetDMA()
+
     def _readAsicTimeout(self):
         """
         special helper function to unpack ASIC request word from BRAM memory.
@@ -475,39 +626,6 @@ class QPIX_GUI(QMainWindow):
 
         return x, y, wordType, addr, enabled
         
-
-    def getAsicTime(self, xpos=0, ypos=0):
-        """
-        wrapper function for reading clkCnt register within QDBAsic, as defined
-        in QPixRegFile.vhd
-        """
-        addr = REG.ASIC(xpos, ypos, AsicREG.CAL)
-        read = self.qpi.regRead(addr)
-        x, y, wordType, timestamp = self._readAsicTime()
-
-        if x != xpos or y != ypos:
-            print(f"CAL WARNING: Read ({x}, {y}) instead of ({xpos},{ypos})")
-
-        return timestamp
-
-    def _readAsicTime(self):
-        """
-        helper function to parse data from the asic cal as stored in RegFile.vhd.
-
-        This method is similar to _readAsicTimeout.
-        """
-
-        # this register stores the whole stamp in the bottom 32 bits
-        timestamp = self.qpi.regRead(REG.MEM(0, 0))
-
-        # next 32 bits
-        word2 = self.qpi.regRead(REG.MEM(0, 1))
-        y = word2 & 0xf
-        x = (word2 >> 4) & 0xf
-        wordType = (word2 >> 24) & 0xf
-
-        return x, y, wordType, timestamp
-
     ###########################
     ## GUI specific Commands ##
     ###########################

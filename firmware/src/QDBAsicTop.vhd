@@ -29,22 +29,22 @@ port (
 --    rst : in STD_LOGIC;
 
     -- Tx/Rx IO
-    --Tx1 : out STD_LOGIC; -- North
-    --Rx1 : in STD_LOGIC;
-    --Tx2 : out STD_LOGIC; -- East
-    --Rx2 : in STD_LOGIC;
+    Tx1 : out STD_LOGIC; -- North
+    Rx1 : in STD_LOGIC;
+    Tx2 : out STD_LOGIC; -- East
+    Rx2 : in STD_LOGIC;
     Tx3 : out STD_LOGIC; -- South
     Rx3 : in STD_LOGIC;
-    --Tx4 : out STD_LOGIC; -- West
-    --Rx4 : in STD_LOGIC;
+    Tx4 : out STD_LOGIC; -- West
+    Rx4 : in STD_LOGIC;
 
     -- extra IO, hardcode IO for now
     --IO : in STD_LOGIC_VECTOR(3 downto 0);
 
     -- optional ss pins -- south Top
      --ss  : in  std_logic;  -- south 8   /  north 6
-    so  : in std_logic;  -- south 6   /  north 4
-    si  : out std_logic;  -- south 4   /  north 2
+--    so  : in std_logic;  -- south 6   /  north 4
+--    si  : out std_logic;  -- south 4   /  north 2
     --sck : in std_logic;   -- south 2   /  north 8
 
     -- outputs
@@ -119,19 +119,19 @@ begin
     gre_led <= not pulse_gre;
     
 	-- clock output to physical
-	si <= clk;
+--	si <= clk;
     --so <= pllClk;
 
     -- connect Tx/Rx to the signals
-    --Tx1 <= TxPortsArr(0);
-    --RxPortsArr(0) <= Rx1;
-    --Tx2 <= TxPortsArr(1);
-    --RxPortsArr(1) <= Rx2;
+    Tx1 <= TxPortsArr(0);
+    RxPortsArr(0) <= Rx1;
+    Tx2 <= TxPortsArr(1);
+    RxPortsArr(1) <= Rx2;
     Tx3 <= TxPortsArr(2);
     RxPortsArr(2) <= Rx3;
-    --Tx4 <= TxPortsArr(3);
-    --RxPortsArr(3) <= Rx4;
-    --RxPortsArr(3) <= '0';
+    Tx4 <= TxPortsArr(3);
+    RxPortsArr(3) <= Rx4;
+    -- RxPortsArr(3) <= '0';
 
     
     -- used to buffer readout on timing measurement
@@ -261,20 +261,20 @@ begin
       --end if;
    --end process;
    -- put sck - data onto the 12 MHz clk
-   process(clk,rst)
-   begin
-      if rising_edge(clk) then
-         if rst = '1' then
-           data_i1 <= '0';
-           data_i2 <= '0';
-           data    <= '0';
-         else
-           data_i1 <= so;
-           data_i2 <= data_i1;
-           data    <= data_i2;
-         end if;
-      end if;
-   end process;
+--   process(clk,rst)
+--   begin
+--      if rising_edge(clk) then
+--         if rst = '1' then
+--           data_i1 <= '0';
+--           data_i2 <= '0';
+--           data    <= '0';
+--         else
+--           data_i1 <= so;
+--           data_i2 <= data_i1;
+--           data    <= data_i2;
+--         end if;
+--      end if;
+--   end process;
 
 
     -- connect external IO to QpixDataProc

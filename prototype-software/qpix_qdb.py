@@ -1,13 +1,16 @@
 # interfacing dependcies
-from qdb_interface import AsicREG, AsicCMD, AsicEnable, AsicMask, qdb_interface, QDBBadAddr, REG, SAQReg
+from qdb_interface import (AsicREG, AsicCMD, AsicEnable, AsicMask,
+                           qdb_interface, QDBBadAddr, REG, SAQReg, DEFAULT_PACKET_SIZE, SAQ_BIN_FILE)
+import os
 import sys
 import time
 
-# GUI things
+# PyQt GUI things
 from PyQt5 import QtCore
 from PyQt5.QtWidgets import (QWidget, QPushButton, QCheckBox, QSpinBox, QLabel,
-                             QDoubleSpinBox, QProgressBar, QStackedLayout)
-from PyQt5.QtCore import QProcess, QTimer
+                             QDoubleSpinBox, QProgressBar, QTabWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QStatusBar,
+                             QDialog, QDialogButtonBox, QLCDNumber)
+from PyQt5.QtCore import QProcess, QTimer, pyqtSignal
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QApplication, QMainWindow, QAction
 
@@ -15,13 +18,63 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QAction
 from array import array
 import ROOT
 import numpy as np
+# for spawning other process to turn binary data into ROOT
+import subprocess 
+
+
+class dialogWindow(QDialog):
+    """
+    QDialog class which provides check boxes to choose to accept triggers for
+    specified channels.  default is OFF, and checks indicate that the
+    corresponding channel will allow a reset to trigger.
+    """
+
+    acceptedMask = pyqtSignal(int)
+
+    def __init__(self):
+        super().__init__()
+
+        self.setWindowTitle("SAQ Mask")
+        size = 15
+        QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
+
+        self.buttonBox = QDialogButtonBox(QBtn)
+        self.buttonBox.accepted.connect(self._makeMask)
+        self.buttonBox.rejected.connect(self.reject)
+
+        self.mask = 0
+        self.layout = QVBoxLayout(self)
+
+        self.layout.addStretch()
+        self.checkBoxes = []
+        for i in range(size):
+            p = QCheckBox(f"Channel - {i+1}")
+            self.checkBoxes.append(p)
+            self.layout.addWidget(p)
+
+        self.layout.addWidget(self.buttonBox)
+        self.layout.addStretch()
+        self.setLayout(self.layout)
+
+    def _makeMask(self):
+        mask = 0
+        for i, box in enumerate(self.checkBoxes):
+            if box.isChecked():
+                mask += 1 << i
+
+        self.acceptedMask.emit(mask)
+        self.accept()
 
 class QPIX_GUI(QMainWindow):
+
+    close = pyqtSignal()
+
     def __init__(self):
         super(QMainWindow, self).__init__()
 
         # IO interfaces
         self.qpi = qdb_interface()
+        self.close.connect(self.qpi.finish)
         self._tf = ROOT.TFile("./test.root", "RECREATE")
         self._tt = ROOT.TTree("qdbData", "data_tree")
 
@@ -40,179 +93,227 @@ class QPIX_GUI(QMainWindow):
         # window setup
         self.setWindowTitle('QPix Viewer')
 
-        # main window
-        self.main_wid = QWidget() # store the main layout
-
-        # main window interactive items
-        self.setCentralWidget(self.main_wid)
-
         # passive triggering
         self._clock = QTimer()
         self._clock.timeout.connect(self.trigger)
         self._lastTrig = -1
 
-
         # initialize the sub menus
         self._make_menuBar()
+        self._make_statusBar()
 
         # create the layouts that are needed for making the GUI pretty
-
-        ###################
-        ## Zybo commands ##
-        ###################
-        # progress tracker
-        pbar = QProgressBar(self.main_wid)
-        pbar.setRange(0, 100)
-        pbar.move(320,320)
-        pbar.setValue(0)
-        self._progBar = pbar
-
-        btn_initialize = QPushButton(self.main_wid)
-        btn_initialize.setText('initialize')
-        btn_initialize.move(0,0)
-        btn_initialize.clicked.connect(self.initialize)
-
-        btn = QPushButton(self.main_wid)
-        btn.setText('trigger')
-        btn.move(0,40)
-        btn.clicked.connect(self.trigger)
-
-        btn_readEvents = QPushButton(self.main_wid)
-        btn_readEvents.setText('get events')
-        btn_readEvents.move(0,80)
-        btn_readEvents.clicked.connect(self.readEvents)
-
-        btn_trgTime = QPushButton(self.main_wid)
-        btn_trgTime.setText('get trigger time')
-        btn_trgTime.move(0,120)
-        btn_trgTime.clicked.connect(self.getTrigTime)
-
-        btn_getFrq = QPushButton(self.main_wid)
-        btn_getFrq.setText('get frequency')
-        btn_getFrq.move(0,160)
-        btn_getFrq.clicked.connect(self.estimateFrequency)
-
-        btn_iter = QPushButton(self.main_wid)
-        btn_iter.setText('iter trg')
-        btn_iter.move(0,200)
-        btn_iter.clicked.connect(self.begin_trig_clock)
-
-        ###################
-        ## ASIC commands ##
-        ###################
-        btn_rst = QPushButton(self.main_wid)
-        btn_rst.setText('reset')
-        btn_rst.move(120,0)
-        btn_rst.clicked.connect(self.resetAsic)
-
-        btn_mask = QPushButton(self.main_wid)
-        btn_mask.setText('mask')
-        btn_mask.move(120,40)
-        btn_mask.clicked.connect(self.setAsicDirMask)
-
-        btn_gtimeout = QPushButton(self.main_wid)
-        btn_gtimeout.setText('get timeout')
-        btn_gtimeout.move(120,80)
-        btn_gtimeout.clicked.connect(self.getAsicTimeout)
-
-        btn_stimeout = QPushButton(self.main_wid)
-        btn_stimeout.setText('set timeout')
-        btn_stimeout.move(120,120)
-        btn_stimeout.clicked.connect(self.setAsicTimeout)
-
-        self.chk_enable = QCheckBox(self.main_wid)
-        self.chk_enable.setText('asic enable')
-        self.chk_enable.setCheckState(0)
-        self.chk_enable.move(120,160)
-        self.chk_enable.stateChanged.connect(self.enableAsic)
-
-        ###################
-        ## SAQ commands  ##
-        ###################
-        btn_sScratch = QPushButton(self.main_wid)
-        btn_sScratch.setText('READ SAQ Scratch')
-        btn_sScratch.move(440, 0)
-        btn_sScratch.clicked.connect(self.getSAQScratch)
-
-        btn_sMask = QPushButton(self.main_wid)
-        btn_sMask.setText('Update SAQ Mask')
-        btn_sMask.move(440, 40)
-        btn_sMask.clicked.connect(self.setSAQMask)
-
-        btn_sFifo = QPushButton(self.main_wid)
-        btn_sFifo.setText('READ SAQ Fifo')
-        btn_sFifo.move(440, 80)
-        btn_sFifo.clicked.connect(self.getSAQFifo)
-
-        self.saq_enable = QCheckBox(self.main_wid)
-        self.saq_enable.setText('SAQ Enable')
-        self.saq_enable.setCheckState(0)
-        self.saq_enable.move(440, 120)
-        self.saq_enable.stateChanged.connect(self.enableSAQ)
-
-        btn_sDMA = QPushButton(self.main_wid)
-        btn_sDMA.setText('Print SMA Registers')
-        btn_sDMA.move(440, 160)
-        btn_sDMA.clicked.connect(self.getDMARegisters)
-
-        btn_sDMA = QPushButton(self.main_wid)
-        btn_sDMA.setText('Reset SMA Registers')
-        btn_sDMA.move(440, 200)
-        btn_sDMA.clicked.connect(self.resetDMA)
-
-        ###################
-        ##  Containers  ###
-        ###################
-        sBox = QSpinBox(self.main_wid)
-        sBox.move(240,0)
-        sBox.setValue(1)
-        sBox.setRange(1, 100)
-        lsBox = QLabel(self.main_wid)
-        lsBox.setText("N-Integrations")
-        lsBox.move(310, 5)
-        sBox_frqStart = QSpinBox(self.main_wid)
-        sBox_frqStart.move(240,40)
-        sBox_frqStart.setValue(1)
-        sBox_frqStart.setRange(1, 100)
-        lsBox = QLabel(self.main_wid)
-        lsBox.setText("Frq Start (Hz)")
-        lsBox.move(310, 45)
-        sBox_frqStop = QSpinBox(self.main_wid)
-        sBox_frqStop.move(240,80)
-        sBox_frqStop.setValue(5)
-        sBox_frqStop.setRange(1, 100)
-        lsBox = QLabel(self.main_wid)
-        lsBox.setText("Frq Stop (Hz)")
-        lsBox.move(310, 85)
-        sBox_frqIter = QDoubleSpinBox(self.main_wid)
-        sBox_frqIter.move(240,120)
-        sBox_frqIter.setValue(0.5)
-        sBox_frqIter.setRange(0.1, 100)
-        lsBox = QLabel(self.main_wid)
-        lsBox.setText("Frq Iteration")
-        lsBox.move(340, 125)
-        # button information for interrogation timer
-        sBox_timeIter = QDoubleSpinBox(self.main_wid)
-        sBox_timeIter.move(120,200)
-        sBox_timeIter.setValue(0.5)
-        sBox_timeIter.setRange(0.1, 100)
-        self._timeValue = sBox_timeIter
-        lsBox = QLabel(self.main_wid)
-        lsBox.setText("time Iteration")
-        lsBox.move(240, 205)
-
-        # SAQ Mask box
-        saqMaskBox = QSpinBox(self.main_wid)
-        saqMaskBox.move(400,45)
-        saqMaskBox.setValue(255)
-        saqMaskBox.setRange(0, 255)
-        self._saqMaskBox = saqMaskBox
-        masklsBox = QLabel(self.main_wid)
-        masklsBox.setText("Mask Value (Enable High)")
-        masklsBox.move(540, 45)
+        self.tabW = QTabWidget()
+        self.tabW.addTab(self._makeSAQlayout(), "SAQ")
+        self.tabW.addTab(self._makeQDBlayout(), "QDB")
+        self.setCentralWidget(self.tabW)
 
         # show the main window
         self.show()
+
+    def _makeQDBlayout(self):
+        """
+        Wrapper function to store all of the QDB widgets into a single layout,
+        and finally add it to the main window's QStackLayout
+        """
+
+        self._qdbPage = QWidget()
+        layout = QGridLayout()
+
+        # progress tracker
+        pbar = QProgressBar()
+        pbar.setRange(0, 100)
+        pbar.setValue(0)
+        layout.addWidget(pbar, 2, 2)
+        self._progBar = pbar
+
+        btn_init = QPushButton()
+        btn_init.setText('initialize')
+        btn_init.clicked.connect(self.initialize)
+        layout.addWidget(btn_init, 0, 0)
+
+        btn = QPushButton()
+        btn.setText('trigger')
+        btn.clicked.connect(self.trigger)
+        layout.addWidget(btn, 0, 1)
+
+        btn_readEvents = QPushButton()
+        btn_readEvents.setText('get events')
+        btn_readEvents.clicked.connect(self.readEvents)
+        layout.addWidget(btn_readEvents, 0, 2)
+
+        btn_trgTime = QPushButton()
+        btn_trgTime.setText('get trigger time')
+        btn_trgTime.clicked.connect(self.getTrigTime)
+        layout.addWidget(btn_trgTime, 0, 3)
+
+        btn_getFrq = QPushButton()
+        btn_getFrq.setText('get frequency')
+        btn_getFrq.clicked.connect(self.estimateFrequency)
+        layout.addWidget(btn_getFrq, 0, 4)
+
+        btn_iter = QPushButton()
+        btn_iter.setText('iter trg')
+        btn_iter.clicked.connect(self.begin_trig_clock)
+        layout.addWidget(btn_iter, 1, 0)
+
+        ## ASIC commands ##
+        btn_rst = QPushButton()
+        btn_rst.setText('reset')
+        btn_rst.clicked.connect(self.resetAsic)
+        layout.addWidget(btn_rst, 1, 1)
+
+        btn_mask = QPushButton()
+        btn_mask.setText('mask')
+        btn_mask.clicked.connect(self.setAsicDirMask)
+        layout.addWidget(btn_mask, 1, 2)
+
+        btn_gtimeout = QPushButton()
+        btn_gtimeout.setText('get timeout')
+        btn_gtimeout.clicked.connect(self.getAsicTimeout)
+        layout.addWidget(btn_gtimeout, 1, 3)
+
+        btn_stimeout = QPushButton()
+        btn_stimeout.setText('set timeout')
+        btn_stimeout.clicked.connect(self.setAsicTimeout)
+        layout.addWidget(btn_stimeout, 1, 4)
+
+        self.chk_enable = QCheckBox()
+        self.chk_enable.setText('asic enable')
+        self.chk_enable.setCheckState(0)
+        self.chk_enable.stateChanged.connect(self.enableAsic)
+        layout.addWidget(self.chk_enable, 0, 5)
+
+        ##  Int Containers  ###
+        sBox = QSpinBox()
+        sBox.setValue(1)
+        sBox.setRange(1, 100)
+        layout.addWidget(sBox, 3, 0)
+        # lsBox = QLabel()
+        # lsBox.setText("N-Integrations")
+
+        sBox_frqStart = QSpinBox()
+        sBox_frqStart.setValue(1)
+        sBox_frqStart.setRange(1, 100)
+        layout.addWidget(sBox_frqStart, 3, 1)
+        # lsBox = QLabel()
+        # lsBox.setText("Frq Start (Hz)")
+
+        sBox_frqStop = QSpinBox()
+        sBox_frqStop.move(240,80)
+        sBox_frqStop.setValue(5)
+        sBox_frqStop.setRange(1, 100)
+        layout.addWidget(sBox_frqStop, 3, 2)
+        # lsBox = QLabel()
+        # lsBox.setText("Frq Stop (Hz)")
+        # lsBox.move(310, 85)
+
+        sBox_frqIter = QDoubleSpinBox()
+        sBox_frqIter.move(240,120)
+        sBox_frqIter.setValue(0.5)
+        sBox_frqIter.setRange(0.1, 100)
+        layout.addWidget(sBox_frqIter, 3, 3)
+        # lsBox = QLabel()
+        # lsBox.setText("Frq Iteration")
+        # lsBox.move(340, 125)
+
+        # button information for interrogation timer
+        sBox_timeIter = QDoubleSpinBox()
+        sBox_timeIter.move(120,200)
+        sBox_timeIter.setValue(0.5)
+        sBox_timeIter.setRange(0.1, 100)
+        layout.addWidget(sBox_timeIter)
+        self._timeValue = sBox_timeIter
+        # lsBox = QLabel()
+        # lsBox.setText("time Iteration")
+        # lsBox.move(240, 205)
+
+        self._qdbPage.setLayout(layout)
+        return self._qdbPage
+
+    def _makeSAQlayout(self):
+        """
+        Wrapper function to make the layout for all of the SAQ widgets and to store them
+        into the QMainWindow's QStackedLayout
+        """
+        self._saqPage = QWidget()
+        layout = QVBoxLayout()
+
+        ## SAQ commands  ##
+        btn_sScratch = QPushButton()
+        btn_sScratch.setText('READ SAQ Scratch')
+        btn_sScratch.clicked.connect(self.getSAQScratch)
+        layout.addWidget(btn_sScratch)
+
+        btn_sFifo = QPushButton()
+        btn_sFifo.setText('READ SAQ Fifo')
+        btn_sFifo.clicked.connect(self.getSAQFifo)
+        layout.addWidget(btn_sFifo)
+
+        btn_sDMA = QPushButton()
+        btn_sDMA.setText('Print SMA Registers')
+        btn_sDMA.clicked.connect(self.getDMARegisters)
+        layout.addWidget(btn_sDMA)
+
+        btn_sDMA = QPushButton()
+        btn_sDMA.setText('Reset SMA Registers')
+        btn_sDMA.clicked.connect(self.resetDMA)
+        layout.addWidget(btn_sDMA)
+
+        # SAQ Mask box
+        hMaskLayout = QHBoxLayout()
+        masklsBox = QLabel()
+        masklsBox.setText("Mask (Enable High)")
+        hMaskLayout.addWidget(masklsBox)
+
+        saqMaskBox = QSpinBox()
+        saqMaskBox.setValue(255)
+        saqMaskBox.setRange(0, 255)
+        hMaskLayout.addWidget(saqMaskBox)
+        self._saqMaskBox = saqMaskBox
+
+        btn_sMask = QPushButton()
+        btn_sMask.setText('Update SAQ Mask')
+        btn_sMask.clicked.connect(self.setSAQMask)
+        hMaskLayout.addWidget(btn_sMask)
+        layout.addLayout(hMaskLayout)
+
+        hLengthLayout = QHBoxLayout()
+        saqLengthL = QLabel()
+        saqLengthL.setText("Update Packet Length")
+        hLengthLayout.addWidget(saqLengthL)
+
+        saqLength = QSpinBox()
+        saqLength.setRange(0, 0x0000_3fff)
+        saqLength.setValue(DEFAULT_PACKET_SIZE)
+        hLengthLayout.addWidget(saqLength)
+        self._saqLength = saqLength
+
+        btn_packetL = QPushButton()
+        btn_packetL.setText('Update Packet Length')
+        btn_packetL.clicked.connect(self.setSAQLength)
+        hLengthLayout.addWidget(btn_packetL)
+        layout.addLayout(hLengthLayout)
+
+        hLCDlabel = QHBoxLayout()
+        pktLabel = QLabel("Current Packet Length")
+        hitLabel = QLabel("Current Fifo Hits")
+        hLCDlabel.addWidget(pktLabel)
+        hLCDlabel.addWidget(hitLabel)
+        layout.addLayout(hLCDlabel)
+
+        hLCDLayout = QHBoxLayout()
+        self.saq_packets = QLCDNumber()
+        self.saq_packets.display(DEFAULT_PACKET_SIZE)
+        hLCDLayout.addWidget(self.saq_packets)
+
+        self.saq_hits = QLCDNumber()
+        self.saq_hits.display(0)
+        hLCDLayout.addWidget(self.saq_hits)
+        layout.addLayout(hLCDLayout)
+
+        self._saqPage.setLayout(layout)
+        return self._saqPage
 
     ############################
     ## Zybo specific Commands ##
@@ -516,12 +617,20 @@ class QPIX_GUI(QMainWindow):
         issue register write to SAQ mask value
         """
         mask = self._saqMaskBox.value()
-
-        assert mask <= 255, "mask must have a value less than 8"
+        assert mask < 1<<15, "total number of bits is 15"
 
         addr = REG.SAQ(SAQReg.MASK)
         print(f"setting mask value: {mask}")
         wrote = self.qpi.regWrite(addr, mask)
+
+    def setSAQLength(self):
+        """
+        Read from the QSpinBox and set the new length register here. This will update
+        the amount of incoming works on each incoming UDP packet.
+        """
+        nPackets = self._saqLength.value()
+        addr = REG.SAQ(SAQReg.SAQ_FIFO_LNGTH)
+        self.qpi.regWrite(addr, nPackets)
 
     def getSAQFifo(self):
         """
@@ -556,16 +665,16 @@ class QPIX_GUI(QMainWindow):
         """
         read the SAQ Hit register buffer
         """
-        addr = REG.SAQ(SAQReg.SAQ_N_HITS)
+        addr = REG.SAQ(SAQReg.SAQ_FIFO_HITS)
         hits = self.qpi.regRead(addr)
-        print(f"SAQ currently has detected {hits} hits.")
+        return hits
 
     def getDMARegisters(self):
         """
         Print the DMA register status, connected to a button
         """
         print("printing DMA Registers:")
-        self.qpi._configureDMA()
+        self.qpi.PrintDMA()
 
     def resetDMA(self):
         """
@@ -626,9 +735,62 @@ class QPIX_GUI(QMainWindow):
 
         return x, y, wordType, addr, enabled
         
+    def launchSaqDialog(self):
+        """
+        Function should manage creation of QDialog box which, if accepted,
+        returns a new mask value to send to SAQ trigger register bits.
+        """
+        self._mask = 0x0
+
+    def closeEvent(self, event):
+        found = os.path.isfile(SAQ_BIN_FILE)
+        if found and hasattr(self, "_outputFile"):
+            subprocess.Popen(["python", "test_root.py", SAQ_BIN_FILE, self._outputFile])
+        self.close.emit()
+
     ###########################
     ## GUI specific Commands ##
     ###########################
+    def _make_statusBar(self):
+        # manage whether or not the UDP / TCP connections are valid
+        self.statusBar = QStatusBar()
+        self.setStatusBar(self.statusBar)
+        saqDialogBtn = QPushButton("Set SAQ Mask")
+        saqDialogBtn.clicked.connect(self.openDialog)
+        self.statusBar.addWidget(saqDialogBtn)
+
+        self.saq_enable = QCheckBox("SAQ Enable")
+        self.saq_enable.setCheckState(0)
+        self.saq_enable.stateChanged.connect(self.enableSAQ)
+        self.statusBar.addWidget(self.saq_enable)
+
+        # timer to periodically check and update what the number is
+        self._lcdtimer = QTimer()
+        self._lcdtimer.timeout.connect(self._updateLCD)
+        self._lcdtimer.setInterval(1000)
+
+        self.saq_lcd_enable = QCheckBox("Update LCDs")
+        self.saq_lcd_enable.clicked.connect(self._enableLCDUpdate)
+        self.statusBar.addWidget(self.saq_lcd_enable)
+
+    def _enableLCDUpdate(self):
+        if self.saq_lcd_enable.isChecked():
+            self._lcdtimer.start()
+        else:
+            self._lcdtimer.stop()
+
+    def _updateLCD(self):
+        """
+        Update the length of the packets before a TLast is issued from the FIFO.
+        This will overwrite the maximum buffer length that is acceptible before
+        a UDP packet is sent to SAQ worker.
+        """
+        addr = REG.SAQ(SAQReg.SAQ_FIFO_LNGTH)
+        nPackets = self.qpi.regRead(addr)
+        self.saq_packets.display(nPackets)
+        hits = self.getSAQHits()
+        self.saq_hits.display(hits)
+
     def _make_menuBar(self):
         menubar = self.menuBar()
         menubar.setNativeMenuBar(False)
@@ -643,9 +805,31 @@ class QPIX_GUI(QMainWindow):
         fileMenu = menubar.addMenu('File')
         fileMenu.addAction(exitAct)
 
+    def openDialog(self):
+        """
+        Function opens dialogWindow class to prompt user for a new timestamp
+        trigger mask.
+        """
+        self.dialog = dialogWindow()
+        self.dialog.acceptedMask.connect(self.accept)
+        self.dialog.rejected.connect(self.reject)
+        self.dialog.exec()
+
+    def accept(self, mask):
+        """
+        Called only on an accepted window, and updates SAQ trigger register
+        space with new mask.
+        """
+        print(f"dialog accepted, setting mask value: {mask:015b}")
+        addr = REG.SAQ(SAQReg.MASK)
+        wrote = self.qpi.regWrite(addr, mask)
+
+    def reject(self):
+        pass
+
+
 if __name__ == "__main__":
 
     app = QApplication(sys.argv)
     window = QPIX_GUI()
-    window.resize(800,700)
     app.exec_()

@@ -6,6 +6,8 @@
 **/vivado**.log
 **/vivado**.str
 **/vivado**.debug
+prototype-software/test*
+prototype-software/*bin
 prototype-project/ZyboQDB
 prototype-project/ZyboQDBVitis
 prototype-project/axi_dma_0_ex

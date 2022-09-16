@@ -10,7 +10,7 @@ import time
 
 # Qt5 dependencies
 import PyQt5
-from PyQt5.QtCore import QObject, QByteArray, pyqtSignal, QThread
+from PyQt5.QtCore import QObject, QByteArray, pyqtSignal, QThread, QEventLoop
 from PyQt5.QtNetwork import QTcpSocket, QHostAddress, QUdpSocket
 
 # global defualts to configure connection to socket
@@ -21,6 +21,10 @@ BUFFER_SIZE = 1024
 # UDP Info
 QP_UDP_IP   = '192.169.1.17'
 QP_UDP_PORT = 420
+EXIT_PACKET = bytes("ZaiJian", encoding="utf-8")
+PACKET_HEADER = bytes("HEADER", encoding="utf-8")
+DEFAULT_PACKET_SIZE = 5
+SAQ_BIN_FILE = 'saqTmp.bin'
 
 # DMA_REG NOTES
 # CTRL NOTE: only lowest bit enables and begins DMA, bit 2 is always high, bit 16 is
@@ -31,8 +35,8 @@ QP_UDP_PORT = 420
 DMA_CTRL = 0x0001_1003 
 DMA_STATUS = 0x0000_0000
 DMA_LENGTH = 0x0000_3fff
-# DMA_DEST = 0x0000_0123
 DMA_DEST_MSB = 0x0000_0000
+
 
 class DMA_STATUS_BIT(Enum):
     """
@@ -53,6 +57,7 @@ class DMA_STATUS_BIT(Enum):
     ERR_IRQ = (1 << 14)
     IRQ_THRESH = (0x1 << 16)
     IRQ_DELAY_STATUS = (0xff << 24)
+
 
 class QDBBadAddr(Exception):
     pass
@@ -86,7 +91,8 @@ class SAQReg(Enum):
     READ2 = 0x52
     READ_ENABLE = 0x53
     SAQ_ENABLE = 0x54
-    SAQ_LENGTH = 0x55
+    SAQ_FIFO_LNGTH = 0x55
+    SAQ_FIFO_HITS = 0x56
 
 
 def MemAddr(evt, pos):
@@ -272,7 +278,8 @@ class saqUDPworker(QObject):
 
         # create and manage the new thread once running
         self._udpsocket = QUdpSocket(self)
-        self._udpsocket.readyRead.connect(lambda: self._readUDPData())
+        self._stopped = True
+        self.f = open(SAQ_BIN_FILE, 'wb')
 
     def _connect(self):
         # try to connect to the UDP socket
@@ -292,15 +299,6 @@ class saqUDPworker(QObject):
 
         return connected
 
-    def _readUDPData(self):
-        while self._udpsocket.hasPendingDatagrams():
-            (data, sender, port) = self._udpsocket.readDatagram(self._udpsocket.pendingDatagramSize())
-            size = len(data)
-            print(f"reading UDP data from: {sender}@{port}, size:{size}, type: {type(data)}")
-            for i in range(int(size/4)):
-                print(f'Word {i} {(int.from_bytes(data[i*4:i*4+4], byteorder="little")):08x}')
-            print(f'ID {(int.from_bytes(data[-2:], byteorder="little")):04x}')
-
     def run(self):
         """
         try to connect to a socket, if successful wait listening forever.
@@ -308,8 +306,25 @@ class saqUDPworker(QObject):
         if not self._connect():
             self.finished.emit()
         else:
-            while True:
-                self._readUDPData()
+            self._stopped = False
+            while not self._stopped:
+                while self._udpsocket.hasPendingDatagrams():
+                    (data, sender, port) = self._udpsocket.readDatagram(self._udpsocket.pendingDatagramSize())
+                    size = len(data)
+
+                    print(f"reading UDP data from: {QHostAddress(sender)}@{port}, size:{size}, type: {type(data)}")
+                    for i in range(int(size/4)):
+                        print(f'Word {i} {(int.from_bytes(data[i*4:i*4+4], byteorder="little")):08x}')
+                    print(f'ID {(int.from_bytes(data[-2:], byteorder="little")):04x}')
+
+                    # receive a closing data packet to stop the client
+                    if data == EXIT_PACKET:
+                        self._stopped = True
+                    else:
+                        print("writing data..")
+                        self.f.write(PACKET_HEADER+size.to_bytes(4, byteorder="little")+data)
+        self.f.close()
+        self.finished.emit()
 
 
 class DMA_REG(Enum):
@@ -345,6 +360,7 @@ class qdb_interface(QObject):
     It is up to the user to ensure that all addresses and values used in those two
     methods correspond to the above register classes.
     """
+    finished = pyqtSignal()
 
     def __init__(self, ip=QP_IP, port=QP_PORT):
         super().__init__()
@@ -367,7 +383,7 @@ class qdb_interface(QObject):
 
             # begin the DMA configuration cycle
             try:
-                self._configureDMA()
+                self.PrintDMA()
                 self._dma_enabled = True
             except Exception as ex:
                 print("unable to configure DMA engine")
@@ -465,8 +481,8 @@ class qdb_interface(QObject):
         
         # set up SAQ register if version >= 8
         if version >= 8:
-            addr = REG.SAQ(SAQReg.SAQ_LENGTH)
-            self.regWrite(addr, 5) # make the length of a packet 5
+            addr = REG.SAQ(SAQReg.SAQ_FIFO_HITS)
+            self.regWrite(addr, DEFAULT_PACKET_SIZE) # make the length of a packet 5
 
         return checksum == verify
 
@@ -569,7 +585,7 @@ class qdb_interface(QObject):
             print('WARNING: no DMA REG data!')
             return None
 
-    def _configureDMA(self):
+    def PrintDMA(self):
         """
         interface should automagically configure and setup DMA registers, since
         this usage uses a special register IO. this function should be used at
@@ -577,15 +593,14 @@ class qdb_interface(QObject):
         and if not disable the DMA engine.
         """
 
-        # initialize DMA ctrl
+        # initialize DMA ctrl on bootup if not running. This should be only register to ever write
         addr = DMA_REG.S2MM_CTRL
         d_ctrl = self._ReadDMA(addr)
         print(f"Initial DMA ctrl status: {d_ctrl:08x}")
         self._WriteDMA(addr, DMA_CTRL)
-        d_ctrl = self._ReadDMA(addr)
-        print(f"Final DMA ctrl status: {d_ctrl:08x}")
 
-        # check DMA destination registers, should NOT write this
+        # check DMA destination registers, should NOT write this! Embedded software
+        # and DMA control this register
         addr = DMA_REG.S2MM_DEST_ADDR
         d_dest = self._ReadDMA(addr)
         print(f"DMA Destination Reg is: {d_dest:08x}")
@@ -593,10 +608,7 @@ class qdb_interface(QObject):
         # update the current length buffer
         addr = DMA_REG.S2MM_LENGTH
         dma_leng = self._ReadDMA(addr)
-        print(f"Initial DMA Length Reg is: {dma_leng:08x}")
-        dma_leng = self._WriteDMA(addr, DMA_LENGTH)
-        dma_leng = self._ReadDMA(addr)
-        print(f"Current DMA Length Reg is: {dma_leng:08x}")
+        print(f"DMA Length Reg is: {dma_leng:08x}")
 
         # verify DMA status
         addr = DMA_REG.S2MM_STATUS
@@ -614,6 +626,7 @@ class qdb_interface(QObject):
 
     def _resetDMA(self):
         """
+        NOTE: Mostly deprecated! Embedded software should handle DMA resets
         Write a bit to the second slot of the ctrl register and read back when it's zero..
         """
         # initialize DMA ctrl
@@ -622,12 +635,19 @@ class qdb_interface(QObject):
         d_ctrl = self._ReadDMA(addr)
         print(f"Final DMA ctrl status: {d_ctrl:08x}")
 
-
     def udp_done(self):
         """
         signaled from the SAQ worker which manages the UDP socket
         """
-        print("SAQ worker is finished!")
+        print("SAQ UDP thread worker is finished!")
+        self.thread.quit()
+
+    def finish(self):
+        """
+        slot function to emit finished signal
+        """
+        self.finished.emit()
+        QUdpSocket().writeDatagram(EXIT_PACKET, QHostAddress(QP_UDP_IP), QP_UDP_PORT)
 
 if __name__ == '__main__':
     qpi = qdb_interface()

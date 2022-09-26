@@ -65,6 +65,7 @@ architecture Behavioral of SAQAxiFIFO_tb is
 
     signal saq_fifo_ren : sl;
     signal saqEnable    : sl;
+    signal saqForce     : sl;
     signal fifo_valid   : sl;
     signal fifo_dout    : slv(63 downto 0);
     signal fifo_empty   : sl;
@@ -97,6 +98,7 @@ begin
 
         -- register connections
         saqEnable => saqEnable,
+        saqForce  => saqForce,
         saqPacketLength => saqPacketLength,
 
         -- AXI4-Stream Data Fifo Ports
@@ -136,58 +138,80 @@ begin
       fifo_dout      <= x"1234567812345678";
       S_AXI_0_tready <= '1';
       saqEnable      <= '1';
+      saqForce       <= '0';
       fifo_full      <= '0'; -- never should be full, really
       fifo_empty     <= '1';
       fifo_wr_en <= '0';  -- doesn't do anything in this module
       saqPacketLength <= x"00000005";
-
-      wait for 500 ns;
+      
+      -- send two sets of 5 packets, valid = '1' and empty = '0' for 20 clk cycles
+      wait for Asic_CLK_PERIOD_NOMINAL_C * 5;
         fifo_empty <= '0';
-
-      wait for 500 ns;
-        fifo_valid <= '0';
-
-      wait for 250 ns;
         fifo_valid <= '1';
-
-      wait for 500 ns;
-        fifo_valid <= '0';
-
-      wait for 250 ns;
-        fifo_valid <= '1';
-
-      wait for 500 ns;
+      wait for Asic_CLK_PERIOD_NOMINAL_C *15;
+        fifo_valid <= '0'; -- fifo not responding, not valid test for 5 clk cycles
         fifo_empty <= '0';
-        
-      wait for 500 ns;
+     wait for Asic_CLK_PERIOD_NOMINAL_C *5;
         fifo_valid <= '1';
+        fifo_empty <= '0';
+     wait for Asic_CLK_PERIOD_NOMINAL_C *5;
+        fifo_valid <= '1';
+        fifo_empty <= '1';
         
-      wait for 5 us;
+     -- verified, sent short packet
+     -- send 8 packets and a force (not empty for 8 clk cycles, all valid)    
+     wait for Asic_CLK_PERIOD_NOMINAL_C *1;
+        saqForce <= '1';
+        fifo_valid <= '1';
+        fifo_empty <= '0';
+     wait for Asic_CLK_PERIOD_NOMINAL_C * 1;
+        saqForce <= '0';              
+     wait for Asic_CLK_PERIOD_NOMINAL_C * 6;
+        fifo_valid <= '1';
         fifo_empty <= '1';
 
-      wait for 5 us;
-        fifo_empty <= '0';
 
-      wait for 500 ns;
-        fifo_valid <= '0';
+--      wait for 250 ns;
+--        fifo_valid <= '1';
 
-      wait for 250 ns;
-        fifo_valid <= '1';
+--      wait for 500 ns;
+--        fifo_valid <= '0';
 
-      wait for 500 ns;
-        fifo_valid <= '0';
+--      wait for 250 ns;
+--        fifo_valid <= '1';
 
-      wait for 250 ns;
-        fifo_valid <= '1';
-
-      wait for 500 ns;
-        fifo_empty <= '0';
+--      wait for 500 ns;
+--        fifo_empty <= '0';
         
-      wait for 500 ns;
-        fifo_valid <= '1';
+--      wait for 500 ns;
+--        fifo_valid <= '1';
         
-      wait for 5 us;
-        fifo_empty <= '1';
+--      wait for 5 us;
+--        fifo_empty <= '1';
+
+--      wait for 5 us;
+--        fifo_empty <= '0';
+
+--      wait for 500 ns;
+--        fifo_valid <= '0';
+
+--      wait for 250 ns;
+--        fifo_valid <= '1';
+
+--      wait for 500 ns;
+--        fifo_valid <= '0';
+
+--      wait for 250 ns;
+--        fifo_valid <= '1';
+
+--      wait for 500 ns;
+--        fifo_empty <= '0';
+        
+--      wait for 500 ns;
+--        fifo_valid <= '1';
+        
+--      wait for 5 us;
+--        fifo_empty <= '1';
 
       wait;
    end process;

@@ -6,7 +6,7 @@
 -- Author     : Kevin Keefe <kevinpk@hawaii.edu>
 -- Company    :
 -- Created    : 2022-09-06
--- Last update: 2022-09-14
+-- Last update: 2022-09-19
 -- Platform   : Windows 11
 -- Standard   : VHDL08
 -------------------------------------------------------------------------------
@@ -56,6 +56,7 @@ port (
   saqHits         : out slv(31 downto 0);
   saqMask         : in  slv(N_SAQ_PORTS - 1 downto 0);
   saqPacketLength : in  slv(31 downto 0);
+  saqForce        : in  sl;
   saqEnable       : in  sl
   );
 end SAQNode;
@@ -175,6 +176,7 @@ begin  -- architecture SAQNode
 
     -- register connections
     saqEnable       => saqEnable,
+    saqForce        => saqForce,
     saqPacketLength => saqPacketLength,
 
     -- direct AXI Data Fifo Connections

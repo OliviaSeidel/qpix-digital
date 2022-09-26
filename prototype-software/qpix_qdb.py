@@ -77,6 +77,7 @@ class QPIX_GUI(QMainWindow):
         self.close.connect(self.qpi.finish)
         self._tf = ROOT.TFile("./test.root", "RECREATE")
         self._tt = ROOT.TTree("qdbData", "data_tree")
+        self._saqMask = 0
 
         # storage tree setup words
         self._data = {
@@ -267,8 +268,9 @@ class QPIX_GUI(QMainWindow):
         hMaskLayout.addWidget(masklsBox)
 
         saqMaskBox = QSpinBox()
-        saqMaskBox.setValue(255)
-        saqMaskBox.setRange(0, 255)
+        # maximum of 15 bits
+        saqMaskBox.setRange(0, 0x7fff)
+        saqMaskBox.setValue(1)
         hMaskLayout.addWidget(saqMaskBox)
         self._saqMaskBox = saqMaskBox
 
@@ -618,10 +620,12 @@ class QPIX_GUI(QMainWindow):
         """
         mask = self._saqMaskBox.value()
         assert mask < 1<<15, "total number of bits is 15"
+        self._saqMask = mask
+        self._saqMaskBox.setValue(self._saqMask)
 
-        addr = REG.SAQ(SAQReg.MASK)
-        print(f"setting mask value: {mask}")
-        wrote = self.qpi.regWrite(addr, mask)
+        # addr = REG.SAQ(SAQReg.MASK)
+        # print(f"setting mask value: {mask}")
+        # wrote = self.qpi.regWrite(addr, mask)
 
     def setSAQLength(self):
         """
@@ -653,12 +657,43 @@ class QPIX_GUI(QMainWindow):
     def enableSAQ(self):
         """
         read / write the single bit register at SaqEnable to turn on Axi Fifo streaming.
+        then update the saqMask to begin allowing triggers from saq pins
         """
         addr = REG.SAQ(SAQReg.SAQ_ENABLE)
         if self.saq_enable.isChecked():
             val = 1
         else:
             val = 0
+        self.qpi.regWrite(addr, val)
+
+        # enable the SAQ, update the mask, and put that value in the spin box
+        if val == 1:
+            addr = REG.SAQ(SAQReg.MASK)
+            wrote = self.qpi.regWrite(addr, self._saqMask)
+            self._saqMaskBox.setValue(self._saqMask)
+
+    def flushSAQ(self):
+        """
+        terminate SAQ reading. Main function to halt data collection and read
+        in all data to this moment.
+        This function performs the following:
+            1. deactivate SAQMask; prevents any more incoming trigger data
+            2. ensure saqEnable is high; ensure saqFifo can write to AxiDataFifo
+            3. write high bit to saqForce register, so that AxiDataFifo will be emptied.
+        """
+        # Step 1 - Turn off all mask bits
+        addr = REG.SAQ(SAQReg.MASK)
+        self.qpi.regWrite(addr, 0)
+
+        # Step 2 - ensure enable is high
+        addr = REG.SAQ(SAQReg.SAQ_ENABLE)
+        val = 1
+        self.qpi.regWrite(addr, val)
+        self.saq_enable.setChecked(1)
+
+        # Step 3 - ping high register space to enable saqForce
+        addr = REG.SAQ(SAQReg.SAQ_FORCE)
+        val = 1
         self.qpi.regWrite(addr, val)
 
     def getSAQHits(self):
@@ -773,6 +808,13 @@ class QPIX_GUI(QMainWindow):
         self.saq_lcd_enable.clicked.connect(self._enableLCDUpdate)
         self.statusBar.addWidget(self.saq_lcd_enable)
 
+        # include a stop button, which will deactivate mask (prevent any triggers) and 
+        # issue a flush to the FIFO. This SHOULD NOT deactivate saqEnable, which
+        # will prevent saqFifo from writing to data fifo
+        self.saq_force = QPushButton("SAQ Flush")
+        self.saq_force.clicked.connect(self.flushSAQ)
+        self.statusBar.addWidget(self.saq_force)
+
     def _enableLCDUpdate(self):
         if self.saq_lcd_enable.isChecked():
             self._lcdtimer.start()
@@ -821,8 +863,8 @@ class QPIX_GUI(QMainWindow):
         space with new mask.
         """
         print(f"dialog accepted, setting mask value: {mask:015b}")
-        addr = REG.SAQ(SAQReg.MASK)
-        wrote = self.qpi.regWrite(addr, mask)
+        self._saqMask = mask
+        self._saqMaskBox.setValue(self._saqMask)
 
     def reject(self):
         pass

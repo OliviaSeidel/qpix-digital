@@ -5,6 +5,9 @@ import random
 import math
 import sys
 
+#Enum-like things
+DIRECTIONS = ("North", "East", "South", "West")
+
 # This is a single trial array
 
 # Seed the RNG

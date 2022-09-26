@@ -312,7 +312,7 @@ class QpixAsicArray():
             self._daqNode.hitData[f'({asic.row}, {asic.col})'] = []
             self._daqNode.regData[f'({asic.row}, {asic.col})'] = []
 
-        self._asics[0][0].connections[3] = self._daqNode
+        self._asics[0][0].connections[AsicDirMask.West.value] = self._daqNode
 
         self._alert = 0
 
@@ -352,13 +352,13 @@ class QpixAsicArray():
         for i in range(self._nrows):
             for j in range(self._ncols):
                 if i > 0:
-                    matrix[i][j].connections[0] = matrix[i-1][j]
+                    matrix[i][j].connections[AsicDirMask.North.value] = matrix[i-1][j]
                 if i < self._nrows-1:
-                    matrix[i][j].connections[2] = matrix[i+1][j]
+                    matrix[i][j].connections[AsicDirMask.South.value] = matrix[i+1][j]
                 if j > 0:
-                    matrix[i][j].connections[3] = matrix[i][j-1]
+                    matrix[i][j].connections[AsicDirMask.West.value] = matrix[i][j-1]
                 if j < self._ncols-1:
-                    matrix[i][j].connections[1] = matrix[i][j+1]    
+                    matrix[i][j].connections[AsicDirMask.East.value] = matrix[i][j+1]    
 
         return matrix
 

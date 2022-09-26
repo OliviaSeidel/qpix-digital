@@ -10,8 +10,6 @@ from unicodedata import decimal
 import numpy as np
 from dataclasses import dataclass
 
-#Enum-like things
-DIRECTIONS = ("North", "East", "South", "West")
 
 ## helper functions
 def PrintFifoInfo(asic):
@@ -219,11 +217,11 @@ class QPFifo:
 class ProcItem:
   '''
   Process item controlled by ProcQueue.
-  0 - asic, the ASIC being pushed to
-  1 - direction, where the data came from
-  2 - QPByte, a QPByte object
-  3 - inTime, time that the data would be received, or that the sending asic completes sending QPByte
-  4 - command, flag to determine how individual ASIC receiving data should behave
+  asic, the ASIC being pushed to
+  dir, where the data came from
+  QPByte, a QPByte object
+  inTime, time that the data would be received, or that the sending asic completes sending QPByte
+  command, flag to determine how individual ASIC receiving data should behave
   '''
   def __init__(self, asic, dir, QPByte, inTime, command=None):
     self.asic = asic
@@ -399,13 +397,14 @@ class QPixAsic:
     self.state_times.append((self.state, self.relTimeNow, self._absTimeNow))
 
   def PrintStatus(self):
-    print("ASIC ("+str(self.row)+","+str(self.col)+") ", end="")
-    print("STATE:"+str(self.state),end=' ')
-    print(f"locFifoSize: {self._localFifo._curSize}")
-    print("Remote Sizes (N,E,S,W):",end=' ')
-    print(str(self._remoteFifo._curSize) + ",",end=' ')
-    print(f"absTime = {self._absTimeNow:0.2e}, trel = {self.relTimeNow:0.2e}")
-    print(f"ticks = {self.relTicksNow}")
+    if self._debugLevel > 0:
+      print("ASIC ("+str(self.row)+","+str(self.col)+") ", end="")
+      print("STATE:"+str(self.state),end=' ')
+      print(f"locFifoSize: {self._localFifo._curSize}")
+      print("Remote Sizes (N,E,S,W):",end=' ')
+      print(str(self._remoteFifo._curSize) + ",",end=' ')
+      print(f"absTime = {self._absTimeNow:0.2e}, trel = {self.relTimeNow:0.2e}")
+      print(f"ticks = {self.relTicksNow}")
 
   def CountConnections(self):
     nConnected = 0
@@ -428,13 +427,15 @@ class QPixAsic:
     The byte that's received in this function should simulate the behavior of
     the logic found in QpixParser.vhd
     """
-    inDir     = queueItem.dir
+    assert isinstance(queueItem.dir, AsicDirMask), "not a valid direction to send as a queue item"
+    inDir     = queueItem.dir.value
     inByte    = queueItem.QPByte
     inTime    = queueItem.inTime
     inCommand = queueItem.command
 
     if self.connections[inDir] is None:
       print("WARNING receiving data from non-existent connection!")
+      return []
     
     outList = [] 
 

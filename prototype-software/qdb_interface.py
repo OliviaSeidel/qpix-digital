@@ -93,6 +93,7 @@ class SAQReg(Enum):
     SAQ_ENABLE = 0x54
     SAQ_FIFO_LNGTH = 0x55
     SAQ_FIFO_HITS = 0x56
+    SAQ_FORCE = 0x57
 
 
 def MemAddr(evt, pos):
@@ -312,16 +313,16 @@ class saqUDPworker(QObject):
                     (data, sender, port) = self._udpsocket.readDatagram(self._udpsocket.pendingDatagramSize())
                     size = len(data)
 
-                    print(f"reading UDP data from: {QHostAddress(sender)}@{port}, size:{size}, type: {type(data)}")
-                    for i in range(int(size/4)):
-                        print(f'Word {i} {(int.from_bytes(data[i*4:i*4+4], byteorder="little")):08x}')
-                    print(f'ID {(int.from_bytes(data[-2:], byteorder="little")):04x}')
+                    # print(f"reading UDP data from: {QHostAddress(sender)}@{port}, size:{size}, type: {type(data)}")
+                    # for i in range(int(size/4)):
+                    #     print(f'Word {i} {(int.from_bytes(data[i*4:i*4+4], byteorder="little")):08x}')
+                    # print(f'ID {(int.from_bytes(data[-2:], byteorder="little")):04x}')
 
                     # receive a closing data packet to stop the client
                     if data == EXIT_PACKET:
                         self._stopped = True
                     else:
-                        print("writing data..")
+                        print(f"writing packet length {size}..")
                         self.f.write(PACKET_HEADER+size.to_bytes(4, byteorder="little")+data)
         self.f.close()
         self.finished.emit()

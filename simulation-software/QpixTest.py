@@ -69,9 +69,36 @@ def tRegReqByte():
 ######################
 ##  Test Functions  ##
 ######################
+def test_count_array_connections(qpix_array):
+    """
+    sum up the connections to ensure they make sense
+    """
+    nConnections, nTrue = 0,0
+    for i in range(qpix_array._ncols):
+        for j in range(qpix_array._nrows):
+            nConnections += qpix_array[i][j].CountConnections()
+
+            # how many horizontal connections there should be
+            if i == 0 or i == qpix_array._ncols - 1:
+                nTrue += 1
+            else:
+                nTrue += 2
+
+            # how many vertical connections there should be
+            if i == 0 or i == qpix_array._nrows - 1:
+                nTrue += 1
+            else:
+                nTrue += 2
+
+    # include daqnode connection
+    assert nConnections == nTrue+1, \
+        f"{nConnections} qpa of {qpix_array._nrows},{qpix_array._ncols} mismatch"
+
+
+
 def test_asic_receiveByte(qpix_array, tProcRegReq):
     """
-    TODO: test various receiveByte conditions
+    test basic receiveByte condition
     """
     tAsic = qpix_array[0][0]
     tProcRegReq.dir = AsicDirMask.West
@@ -142,6 +169,13 @@ def test_asic_constructor(qpix_array):
     assert tAsic.nPixels == nPix, "incorrect amount of pixels on ASIC"
     assert isinstance(tAsic.config, QpixAsic.AsicConfig), "asic config, incorrect type"
 
+def test_asic_time_update(qpix_asic):
+    tAsic = qpix_asic
+    dT = 2e-6
+    tAsic.UpdateTime(dT)
+    tAsic.UpdateTime(dT/2)
+    assert tAsic._absTimeNow == dT, "update time function not working"
+
 if __name__ == "__main__":
     qpix_array = QpixAsicArray.QpixAsicArray(
                 nrows=tRows, ncols=tCols, nPixs=nPix,
@@ -149,6 +183,7 @@ if __name__ == "__main__":
                 timeEpsilon=timeEpsilon, timeout=timeout,
                 hitsPerSec=hitsPerSec, debug=debug, tiledf=tiledf)
 
+    ## test full readout of 10 hits
     nHits = 10
     inTime = qpix_array[0][0].transferTime + qpix_array[0][1].transferTime
 
@@ -172,7 +207,7 @@ if __name__ == "__main__":
     # how to handle parallel transfers??
     # asic right after receive byte
     prevState = tAsic.state
-    eT = inTime
+    eT = inTime + tAsic.transferTime
     print(f"receive byte, ASIC now in state: {tAsic.state} @ {tAsic._absTimeNow:0.2e} - expected {eT:0.2e}")
 
     # process away all of the local hits generated

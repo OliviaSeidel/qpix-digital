@@ -37,9 +37,9 @@ port (
    DaqTx : out STD_LOGIC;
    DaqRx : in  STD_LOGIC;
    -- SAQ I/O
---   jbp : in std_logic_vector(3 downto 0);
---   jbn : in std_logic_vector(3 downto 0);
-   Saq : in STD_LOGIC;
+   jd : in std_logic_vector(7 downto 0);
+   jc : in std_logic_vector(7 downto 0);
+--   Saq : in STD_LOGIC;
 
    -- PS ports
    DDR_addr          : inout STD_LOGIC_VECTOR (14 downto 0);
@@ -148,7 +148,7 @@ architecture Behavioral of QDBDaqTop is
    constant pulse_time : integer                      := 2_999_999;  -- fclk_freq / pulse_time = pulse's width
 
    -- SAQ signals / Constants
-   constant N_SAQ_PORTS    : natural   := 15;
+   constant N_SAQ_PORTS    : natural   := 16;
    constant TIMESTAMP_BITS : natural   := 32;
    signal saqMask          : std_logic_vector(N_SAQ_PORTS - 1 downto 0);
    signal saqPacketLength  : std_logic_vector(31 downto 0);
@@ -216,8 +216,9 @@ begin
 --        IB => jbn(i)  -- 1-bit input: Diff_n buffer input (connect directly to top-level port)
 --    );
 --    end generate;
-    saqPortData(N_SAQ_PORTS - 1 downto 1) <= "00000000000000"; 
-    saqPortData(0) <= Saq;
+--    saqPortData(N_SAQ_PORTS - 1 downto 1) <= "00000000000000"; 
+--    saqPortData(0) <= Saq;
+   saqPortData <= jd & jc;
     
     
     counter: process(fclk, rst) is
@@ -353,7 +354,7 @@ begin
    generic map (
       X_NUM_G        => X_NUM_G,
       Y_NUM_G        => Y_NUM_G,
-      Version        => x"0000_000a",
+      Version        => x"0000_000b",
       N_SAQ_PORTS    => N_SAQ_PORTS,
       TIMESTAMP_BITS => TIMESTAMP_BITS
    )

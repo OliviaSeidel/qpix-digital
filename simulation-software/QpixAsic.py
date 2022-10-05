@@ -454,10 +454,10 @@ class QPixAsic:
       isBroadcast = not inByte.Dest
       # currently ALL register requests are broadcast..
       transactionCompleteTime = inTime + self.transferTime
-      self.UpdateTime(transactionCompleteTime)
       for i, connection in enumerate(self.connections):
         if i != inDir and connection is not None:
           outList.append((connection, (i+2)%4, inByte, transactionCompleteTime, inCommand))
+          self.UpdateTime(transactionCompleteTime)
 
       # is this word relevant to this asic?
       forThisAsic = (inByte.XDest == self.row and inByte.YDest == self.col) or isBroadcast

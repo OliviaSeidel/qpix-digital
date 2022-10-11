@@ -278,7 +278,7 @@ class QpixAsicArray():
       RouteState  - string or None type member to define current routing method of Array
       push_state  - enable flag that is sent to ASICs within the array enabling push
     """
-    def __init__(self, nrows, ncols, nPixs=16, fNominal=50e6, pctSpread=0.05, deltaT=1e-5, timeEpsilon=1e-6,
+    def __init__(self, nrows, ncols, nPixs=16, fNominal=30e6, pctSpread=0.05, deltaT=1e-5, timeEpsilon=1e-6,
                 timeout=1.5e4, hitsPerSec = 20./1., debug=0.0, tiledf=None):
 
         # if we have a tiledf to construct an array, then the size is determined by the tile

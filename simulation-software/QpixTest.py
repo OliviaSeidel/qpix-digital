@@ -11,7 +11,7 @@ from QpixAsic import AsicState
 tRows = 2
 tCols = 2
 nPix = 16
-fNominal = 50e6
+fNominal = 30e6
 pctSpread = 0.05
 deltaT = 1e-5
 timeEpsilon = 1e-6
@@ -19,7 +19,7 @@ timeout = 15e4
 hitsPerSec = 20./1.
 debug = 0.0
 tiledf = None
-nTicks = 4*66
+nTicks = 1700
 debug = 0
 pTimeout = fNominal/2
 ## test arguments
@@ -129,23 +129,21 @@ def test_asic_process_push(qpix_array):
     TODO: test various injectHits and process conditions
     """
     tAsic = qpix_array[0][0]
-    endTime = 1e-3
-    hits = np.arange(0, endTime, 1e-5)
+    endTime = deltaT*1000
+    hits = np.arange(0, endTime, endTime/100.)
     tAsic.InjectHits(hits)
     nHits = 0
-    curT = 0
+    curT = deltaT
 
     # push should allow all of the hits to come through
     tAsic.config.EnablePush = True
-    while nHits < len(hits) and tAsic._absTimeNow <= endTime:
-        h = tAsic.Process(curT)
+    while curT < endTime + deltaT*2 or tAsic._localFifo._curSize > 0:
+        nHits += len(tAsic.Process(curT))
         curT += deltaT
-        nHits += len(h)
-    assert nHits == len(hits), "processing did not generate transactions for all injected hits"
-    assert tAsic._absTimeNow - tAsic.tOsc <= endTime, "processing of injected hits took too long"
-    nEvts = len(hits)
-    nStates = len(tAsic.state_times) 
-    assert nStates == nEvts, f"{nStates} not equivalents to {nEvts}"
+    assert tAsic._localFifo._curSize == 0, f"Local FIFO should be empty of hits, total hits {len(hits)}"
+    size = len(hits)
+    assert tAsic._localFifo._totalWrites == size, "processing did not write each hit to local FIFO"
+    # assert tAsic._absTimeNow - tAsic.tOsc <= endTime, "processing of injected hits took too long"
 
 def test_asic_updateTime(qpix_array):
     tAsic = qpix_array[0][0]
@@ -176,6 +174,63 @@ def test_asic_time_update(qpix_asic):
     tAsic.UpdateTime(dT/2)
     assert tAsic._absTimeNow == dT, "update time function not working"
 
+def test_asic_full_readout(qpix_array):
+    """
+    Full readout test of a remote ASIC within qpix_array
+    """
+    nHits = 10
+    inTime = qpix_array[0][0].transferTime + qpix_array[0][1].transferTime
+    hits = np.arange(1e-9, inTime, inTime/nHits) # don't start at 0 time
+
+    # select asic to test
+    tAsic = qpix_array[1][1]
+    prevState = tAsic.state
+    assert prevState == AsicState.Idle, "Initial state of ASIC should be IDLE"
+    tAsic.InjectHits(hits)
+    prevState = tAsic.state
+    assert prevState == AsicState.Idle, "pull ASIC should remain in IDLE until receiving an interrogate"
+
+    tRegReqByte = QpixAsic.QPByte(AsicWord.REGREQ, None, None, ReqID=2)
+    proc = QpixAsic.ProcItem(tAsic, QpixAsic.AsicDirMask.North, tRegReqByte, inTime, command="Interrogate")
+    _ = tAsic.ReceiveByte(proc)
+
+    # transmit local
+    prevState = tAsic.state
+    eT = inTime + tAsic.transferTime
+    dT = tAsic._absTimeNow
+    assert prevState == AsicState.TransmitLocal, "should begin transmitting local data after reciing a Interrogate"
+    fifoHits = tAsic._localFifo._curSize
+    while fifoHits > 0:
+        dT += deltaT
+        _ = tAsic.Process(dT)
+        fifoHits = tAsic._localFifo._curSize
+
+    # transmit finish word
+    eT += tAsic.transferTime * nHits
+    prevState = tAsic.state
+    assert prevState == AsicState.Finish, "finish state should follow sending all local data"
+    nFinish, procs = 0, 0
+    while tAsic.state == prevState:
+        dT = tAsic._absTimeNow + deltaT
+        nFinish += len(tAsic.Process(dT))
+        procs += 1
+    eT += tAsic.transferTime * 1
+
+    # transmit remote state, should be length of timeout
+    prevState = tAsic.state
+    assert prevState == AsicState.TransmitRemote, "Remote state should follow end word"
+    nRemote, procs = 0, 0
+    while tAsic.state == prevState:
+        dT = tAsic._absTimeNow + deltaT
+        nRemote += len(tAsic.Process(dT))
+        procs += 1
+
+    # back to IDLE state
+    eT += tAsic.tOsc * tAsic.config.timeout
+    prevState = tAsic.state
+    assert prevState == AsicState.Idle, "Finished state should be back in IDLE"
+    assert round(eT, 6) == round(tAsic._absTimeNow, 6), "Different expected process times during Final step of full readout"
+
 if __name__ == "__main__":
     qpix_array = QpixAsicArray.QpixAsicArray(
                 nrows=tRows, ncols=tCols, nPixs=nPix,
@@ -183,67 +238,4 @@ if __name__ == "__main__":
                 timeEpsilon=timeEpsilon, timeout=timeout,
                 hitsPerSec=hitsPerSec, debug=debug, tiledf=tiledf)
 
-    ## test full readout of 10 hits
-    nHits = 10
-    inTime = qpix_array[0][0].transferTime + qpix_array[0][1].transferTime
-
-    hits = np.arange(1e-9, inTime, inTime/nHits) # don't start at 0 time
-    # select asic to test
-    tAsic = qpix_array[1][1]
-    # asic right after inject hits
-    prevState = tAsic.state
-    print(f"initial ASIC, ASIC now in state: {tAsic.state} @ {tAsic._absTimeNow:0.2e}")
-    tAsic.InjectHits(hits)
-
-    # asic right after inject hits
-    prevState = tAsic.state
-    print(f"inject hits, ASIC now in state: {tAsic.state} @ {tAsic._absTimeNow:0.2e}")
-
-    tRegReqByte = QpixAsic.QPByte(AsicWord.REGREQ, None, None, ReqID=2)
-    proc = QpixAsic.ProcItem(tAsic, QpixAsic.AsicDirMask.North, tRegReqByte, inTime, command="Interrogate")
-    b = tAsic.ReceiveByte(proc)
-    fifoHits = tAsic._localFifo._curSize
-
-    # how to handle parallel transfers??
-    # asic right after receive byte
-    prevState = tAsic.state
-    eT = inTime + tAsic.transferTime
-    print(f"receive byte, ASIC now in state: {tAsic.state} @ {tAsic._absTimeNow:0.2e} - expected {eT:0.2e}")
-
-    # process away all of the local hits generated
-    while fifoHits > 0:
-        dT = tAsic._absTimeNow + deltaT
-        _ = tAsic.Process(dT)
-        fifoHits = tAsic._localFifo._curSize
-
-    # transmit local
-    eT += tAsic.transferTime * nHits
-    prevState = tAsic.state
-    print(f"Fifo hits are empty, ASIC now in state: {tAsic.state} @ {tAsic._absTimeNow:0.2e} - expected {eT:0.2e}")
-
-    while tAsic.state == prevState:
-        dT = tAsic._absTimeNow + deltaT
-        _ = tAsic.Process(dT)
-
-    # transmit finish
-    prevState = tAsic.state
-    print(f"state change, ASIC now in state: {tAsic.state} @ {tAsic._absTimeNow:0.2e} - expected {eT:0.2e}")
-
-    # this should be the finish state
-    while tAsic.state == prevState:
-        dT = tAsic._absTimeNow + deltaT
-        _ = tAsic.Process(dT)
-
-    # transmit remote
-    eT += tAsic.transferTime * 1
-    prevState = tAsic.state
-    print(f"state change, ASIC now in state: {tAsic.state} @ {tAsic._absTimeNow:0.2e} - expected {eT:0.2e}")
-
-    while tAsic.state == prevState:
-        dT = tAsic._absTimeNow + deltaT
-        _ = tAsic.Process(dT)
-
-    # back to IDLE
-    eT += tAsic.tOsc * tAsic.config.timeout
-    prevState = tAsic.state
-    print(f"state change, ASIC now in state: {tAsic.state} @ {tAsic._absTimeNow:0.2e} - expected {eT:0.2e}")
+    print("test")

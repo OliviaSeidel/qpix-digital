@@ -375,7 +375,7 @@ class QPixAsic:
         row=None,
         col=None,
         isDaqNode=False,
-        transferTicks=4 * 66,
+        transferTicks=1700,
         debugLevel=0,
         pTimeout=25e6,
     ):
@@ -420,7 +420,7 @@ class QPixAsic:
         # useful things for InjectHits
         self._times = []
         self._channels = []
-        self._lastAsicHitTime = 0
+        self._lastAsicHitTime = -1
 
     def __repr__(self):
         self.PrintStatus()
@@ -519,7 +519,7 @@ class QPixAsic:
                 if inByte.OpWrite:
                     self.config = inByte.config
 
-                # if register read
+                # if register read, assume happens after broadcasts
                 elif inByte.OpRead:
                     finishTime = inTime + self.transferTime
                     byteOut = QPByte(
@@ -608,8 +608,6 @@ class QPixAsic:
 
         # write in the last byte
         self._localFifo.Write(prevByte)
-
-        # print(f'giving asic ({self.row}, {self.col}) {len(newHits)} hits')
         return len(newHits)
 
     def InjectHits(self, times, channels=None):
@@ -772,14 +770,12 @@ class QPixAsic:
         self.UpdateTime(transactionCompleteTime, self.config.DirMask.value, isTx=True)
         self._changeState(AsicState.Idle)
         respByte = QPByte(AsicWord.REGRESP, self.row, self.col, 0, [0])
-        return [
-            (
+        return [(
                 self.connections[self.config.DirMask.value].asic,
                 (self.config.DirMask.value + 2) % 4,
                 respByte,
                 transactionCompleteTime,
-            )
-        ]
+            )]
 
     def _processTransmitLocalState(self, targetTime):
         """
@@ -787,24 +783,23 @@ class QPixAsic:
         sends a single local state queue item into the outlist
         """
 
+        localTransfers = []
         transactionCompleteTime = self._absTimeNow + self.transferTime
-
-        # read an event from our local FIFO, if there is something in it, transmit it
-        hit = self._localFifo.Read()
-        if hit is not None:
-            i = self.config.DirMask.value
-            self.UpdateTime(transactionCompleteTime, i, isTx=True)
-            return [
-                (
-                    self.connections[i].asic,
-                    (i + 2) % 4,
-                    hit,
-                    transactionCompleteTime,
-                )
-            ]
-        else:
+        while transactionCompleteTime < targetTime and self._localFifo._curSize > 0:
+            hit = self._localFifo.Read()
+            if hit is not None:
+                i = self.config.DirMask.value
+                self.UpdateTime(transactionCompleteTime, i, isTx=True)
+                localTransfers.append((
+                        self.connections[i].asic,
+                        (i + 2) % 4,
+                        hit,
+                        transactionCompleteTime,
+                    ))
+                transactionCompleteTime = self._absTimeNow + self.transferTime
+        if self._localFifo._curSize == 0:
             self._changeState(AsicState.Finish)
-            return []
+        return localTransfers
 
     def _processFinishState(self, targetTime):
         """
@@ -820,14 +815,12 @@ class QPixAsic:
         # after sending the word we go to the Transmit remote state
         self._changeState(AsicState.TransmitRemote)
 
-        return [
-            (
+        return [(
                 self.connections[self.config.DirMask.value].asic,
                 (self.config.DirMask.value + 2) % 4,
                 finishByte,
                 transactionCompleteTime,
-            )
-        ]
+            )]
 
     def _processTransmitRemoteState(self, targetTime):
         """
@@ -836,47 +829,36 @@ class QPixAsic:
         """
 
         # If we're timed out, just kill it
-        if self._absTimeNow - self.timeoutStart > self.config.timeout / self.fOsc:
+        timeout = bool(self._absTimeNow - self.timeoutStart > self.config.timeout * self.tOsc)
+        if timeout:
             self._changeState(AsicState.Idle)
-            if self._localFifo._curSize > 0:
-                print(
-                    "Lost "
-                    + str(len(self._localFifo._curSize))
-                    + " hits that were left to forward!"
-                )
             return []
 
-        hitsToForward = False
-        if self._remoteFifo._curSize > 0:
-            hitsToForward = True
-
-        # If there's nothing to forward, just bring us up to requested time
-        if not (hitsToForward):
-            self.UpdateTime(targetTime)
-            if self._absTimeNow - self.timeoutStart > self.config.timeout / self.fOsc:
+        # If there's nothing to forward, bring us up to requested time
+        if self._remoteFifo._curSize == 0:
+            if self._absTimeNow + self.timeoutStart > self.config.timeout * self.tOsc:
+                self.UpdateTime(self.timeoutStart + self.config.timeout * self.tOsc)
                 self._changeState(AsicState.Idle)
+            else:
+                self.UpdateTime(targetTime)
             return []
 
         else:
             hitlist = []
-            hit = self._remoteFifo.Read()
-            if hit is not None:
-                completeTime = self._absTimeNow
-                if (self._absTimeNow - self.timeoutStart > self.config.timeout / self.fOsc):
-                    self._changeState(AsicState.Idle)
-                    self.UpdateTime(completeTime)
-                    return hitlist
-                else:
-                    completeTime += self.transferTime
-                    hitlist.append((
-                            self.connections[self.config.DirMask.value].asic,
-                            (self.config.DirMask.value + 2) % 4,
-                            hit,
-                            completeTime))
-                    self.UpdateTime(completeTime, self.config.DirMask.value, isTx=True)
-            return hitlist
+            while transactionCompleteTime < targetTime and self._remoteFifo._curSize > 0 and not timeout:
+                hit = self._remoteFifo.Read()
+                i = self.config.DirMask.value
+                self.UpdateTime(transactionCompleteTime, i, isTx=True)
+                hitlist.append((
+                        self.connections[i].asic,
+                        (i + 2) % 4,
+                        hit,
+                        transactionCompleteTime,
+                    ))
+                transactionCompleteTime = self._absTimeNow + self.transferTime
+                timeout = bool(self._absTimeNow - self.timeoutStart > self.config.timeout * self.tOsc)
 
-        return []
+            return hitlist
 
     def UpdateTime(self, absTime, dir=None, isTx=None):
         """
@@ -894,8 +876,11 @@ class QPixAsic:
 
         if dir is not None:
             assert isTx is not None, "must select Tx or Rx when updating connection"
-            if isTx:
-                self.connections[dir].send(absTime)
+            # if Tx send at the earliest convenient time
+            if isTx and self.connections[dir].send(absTime):
+                newT = self.connections[dir].txBusy + self.transferTime + self.tOsc
+                if self.connections[dir].send(newT):
+                    raise QPExcpetion()
             else:
                 self.connections[dir].recv(absTime)
 
@@ -951,12 +936,18 @@ class QPixAsic:
 
             def send(self, T):
                 """
-                Connection sends a transaction that finished at time T
+                Connection sends a transaction that finished at time T.
+                Return bool stating whether or not Tx line is busy
                 """
                 if self.txBusy > T - self.transTime:
-                    print(f"WARNING sending to ({self.asic.row},{self.asic.col}) on busy connection")
+                    if self.asic is not None:
+                        print(f"WARNING sending to ({self.asic.row},{self.asic.col}) on busy connection")
+                        return True
+                    else:
+                        print("WARNING sending on busy none asic")
                 else:
                     self.txBusy = T
+                return False
 
             def recv(self, T):
                 """
@@ -970,13 +961,13 @@ class QPixAsic:
 class DaqNode(QPixAsic):
     def __init__(
         self,
-        fOsc=50e6,
+        fOsc=30e6,
         nPixels=16,
         randomRate=20.0 / 1.0,
         timeout=1000,
         row=None,
         col=None,
-        transferTicks=4 * 66,
+        transferTicks=1700,
         debugLevel=0,
     ):
         # makes itself basically like a qpixasic

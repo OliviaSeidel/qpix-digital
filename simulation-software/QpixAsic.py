@@ -498,16 +498,16 @@ class QPixAsic:
             transactionCompleteTime = inTime + self.transferTime
             for i, connection in enumerate(self.connections):
                 if i != inDir and connection:
+                    sendT = self.UpdateTime(transactionCompleteTime, i, isTx=True)
                     outList.append(
                         (
                             connection.asic,
                             (i + 2) % 4,
                             inByte,
-                            transactionCompleteTime,
+                            sendT,
                             inCommand,
                         )
                     )
-                    self.UpdateTime(transactionCompleteTime, i, isTx=True)
 
             # is this word relevant to this asic?
             forThisAsic = (
@@ -528,8 +528,8 @@ class QPixAsic:
                     i = self.config.DirMask.value
                     destAsic = self.connections[i].asic
                     fromDir = (i + 2) % 4
-                    outList.append((destAsic, fromDir, byteOut, finishTime))
-                    self.UpdateTime(finishTime, i, isTx=True)
+                    sendT = self.UpdateTime(finishTime, i, isTx=True)
+                    outList.append((destAsic, fromDir, byteOut, sendT))
 
                 # if it's not a read or a write, it's a command interrogation
                 else:
@@ -767,14 +767,14 @@ class QPixAsic:
         the IDLE/measuring state.
         """
         transactionCompleteTime = self._absTimeNow + self.transferTime
-        self.UpdateTime(transactionCompleteTime, self.config.DirMask.value, isTx=True)
+        sendT = self.UpdateTime(transactionCompleteTime, self.config.DirMask.value, isTx=True)
         self._changeState(AsicState.Idle)
         respByte = QPByte(AsicWord.REGRESP, self.row, self.col, 0, [0])
         return [(
                 self.connections[self.config.DirMask.value].asic,
                 (self.config.DirMask.value + 2) % 4,
                 respByte,
-                transactionCompleteTime,
+                sendT,
             )]
 
     def _processTransmitLocalState(self, targetTime):
@@ -789,12 +789,12 @@ class QPixAsic:
             hit = self._localFifo.Read()
             if hit is not None:
                 i = self.config.DirMask.value
-                self.UpdateTime(transactionCompleteTime, i, isTx=True)
+                sendT = self.UpdateTime(transactionCompleteTime, i, isTx=True)
                 localTransfers.append((
                         self.connections[i].asic,
                         (i + 2) % 4,
                         hit,
-                        transactionCompleteTime,
+                        sendT,
                     ))
                 transactionCompleteTime = self._absTimeNow + self.transferTime
         if self._localFifo._curSize == 0:
@@ -808,7 +808,7 @@ class QPixAsic:
         """
         # send the finish packet word
         transactionCompleteTime = self._absTimeNow + self.transferTime
-        self.UpdateTime(transactionCompleteTime, self.config.DirMask.value, isTx=True)
+        sendT = self.UpdateTime(transactionCompleteTime, self.config.DirMask.value, isTx=True)
         finishByte = QPByte(AsicWord.EVTEND, self.row, self.col, 0, [0])
         self.timeoutStart = self._absTimeNow
 
@@ -819,7 +819,7 @@ class QPixAsic:
                 self.connections[self.config.DirMask.value].asic,
                 (self.config.DirMask.value + 2) % 4,
                 finishByte,
-                transactionCompleteTime,
+                sendT,
             )]
 
     def _processTransmitRemoteState(self, targetTime):
@@ -848,12 +848,12 @@ class QPixAsic:
             while transactionCompleteTime < targetTime and self._remoteFifo._curSize > 0 and not timeout:
                 hit = self._remoteFifo.Read()
                 i = self.config.DirMask.value
-                self.UpdateTime(transactionCompleteTime, i, isTx=True)
+                sendT = self.UpdateTime(transactionCompleteTime, i, isTx=True)
                 hitlist.append((
                         self.connections[i].asic,
                         (i + 2) % 4,
                         hit,
-                        transactionCompleteTime,
+                        sendT,
                     ))
                 transactionCompleteTime = self._absTimeNow + self.transferTime
                 timeout = bool(self._absTimeNow - self.timeoutStart > self.config.timeout * self.tOsc)
@@ -874,12 +874,13 @@ class QPixAsic:
         far forward in time.
         """
 
+        transT = absTime
         if dir is not None:
             assert isTx is not None, "must select Tx or Rx when updating connection"
             # if Tx send at the earliest convenient time
             if isTx and self.connections[dir].send(absTime):
-                newT = self.connections[dir].txBusy + self.transferTime + self.tOsc
-                if self.connections[dir].send(newT):
+                transT = self.connections[dir].txBusy + self.transferTime + self.tOsc
+                if self.connections[dir].send(transT):
                     raise QPExcpetion()
             else:
                 self.connections[dir].recv(absTime)
@@ -895,6 +896,8 @@ class QPixAsic:
                 # update the local clock cycles
                 self.relTimeNow += cycles * self.tOsc
                 self.relTicksNow += cycles
+
+        return transT
 
     class AsicConnections():
 

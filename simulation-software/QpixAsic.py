@@ -441,6 +441,8 @@ class QPixAsic:
         """
         assert isinstance(newState, AsicState), "Incorrect state transition!"
         self.state = newState
+        if self.state == AsicState.TransmitRemote:
+            self.timeoutStart = self._absTimeNow
         self.state_times.append((self.state, self.relTimeNow, self._absTimeNow))
 
     def PrintStatus(self):
@@ -502,7 +504,7 @@ class QPixAsic:
                     outList.append(
                         (
                             connection.asic,
-                            (i + 2) % 4,
+                            AsicDirMask((i + 2) % 4),
                             inByte,
                             sendT,
                             inCommand,
@@ -527,18 +529,33 @@ class QPixAsic:
                     )
                     i = self.config.DirMask.value
                     destAsic = self.connections[i].asic
-                    fromDir = (i + 2) % 4
+                    fromDir = AsicDirMask((i + 2) % 4)
                     sendT = self.UpdateTime(finishTime, i, isTx=True)
                     outList.append((destAsic, fromDir, byteOut, sendT))
 
                 # if it's not a read or a write, it's a command interrogation
                 else:
-                    self._changeState(AsicState.TransmitLocal)
-                    self._measuredTime.append(self.relTimeNow)
-                    self._command = inCommand
                     if inCommand == "Interrogate":
                         # self._GeneratePoissonHits(inTime)
-                        self._ReadHits(inTime)
+                        self._ReadHits(inTime+self.transferTime)
+                    elif inCommand == "Calibrate":
+                        curTicks = self.relTicksNow
+                        self._localFifo.Write(
+                            QPByte(
+                                AsicWord.REGRESP,
+                                self.row,
+                                self.col,
+                                curTicks,
+                                [],
+                                data=self._measuredTime[-1],
+                            )
+                        )
+                    if self._localFifo._curSize > 0:
+                        self._changeState(AsicState.TransmitLocal)
+                    else:
+                        self._changeState(AsicState.TransmitRemote)
+                    self._measuredTime.append(self.relTimeNow)
+                    self._command = inCommand
 
         # all data that is not a register request gets stored on remote fifos
         else:
@@ -661,10 +678,7 @@ class QPixAsic:
 
         then write hits to local fifos
         """
-        # if not(len(self._times) ==  len(self._channels)):
-        #   print('WARNING: times and channels not the same length')
-
-        if len(self._times) > 0:
+        if len(self._times) > 0 and  targetTime > self._times[0]:
             # index times and channels such that they are within last asic hit time and target time
             TimesIndex = np.logical_and(
                 self._times > self._lastAsicHitTime, self._times <= targetTime
@@ -698,7 +712,7 @@ class QPixAsic:
           targetTime - time to push the FSM foward.
         """
         # nothing to process if DAQ or if target time is in past
-        if self.isDaqNode or self._absTimeNow > targetTime:
+        if self.isDaqNode or self._absTimeNow >= targetTime:
             return []
 
         # Process incoming commands first
@@ -706,23 +720,10 @@ class QPixAsic:
         # command should build up any 'hit' of interest
         if self._command == "Calibrate":
             self._command = None
-            self._changeState(AsicState.TransmitLocal)
-            curTicks = self.relTicksNow
-            self._localFifo.Write(
-                QPByte(
-                    AsicWord.REGRESP,
-                    self.row,
-                    self.col,
-                    curTicks,
-                    [],
-                    data=self._measuredTime[-1],
-                )
-            )
 
         # an ASIC timestamp request
         elif self._command == "Interrogate":
             self._command = None
-            self._changeState(AsicState.TransmitLocal)
 
         # if the ASIC is in a push state, check for any new hits, if so start sending them
         elif self.config.EnablePush:
@@ -792,7 +793,7 @@ class QPixAsic:
                 sendT = self.UpdateTime(transactionCompleteTime, i, isTx=True)
                 localTransfers.append((
                         self.connections[i].asic,
-                        (i + 2) % 4,
+                        AsicDirMask((i + 2) % 4),
                         hit,
                         sendT,
                     ))
@@ -810,14 +811,13 @@ class QPixAsic:
         transactionCompleteTime = self._absTimeNow + self.transferTime
         sendT = self.UpdateTime(transactionCompleteTime, self.config.DirMask.value, isTx=True)
         finishByte = QPByte(AsicWord.EVTEND, self.row, self.col, 0, [0])
-        self.timeoutStart = self._absTimeNow
 
         # after sending the word we go to the Transmit remote state
         self._changeState(AsicState.TransmitRemote)
 
         return [(
                 self.connections[self.config.DirMask.value].asic,
-                (self.config.DirMask.value + 2) % 4,
+                AsicDirMask((self.config.DirMask.value + 2) % 4),
                 finishByte,
                 sendT,
             )]
@@ -845,13 +845,14 @@ class QPixAsic:
 
         else:
             hitlist = []
+            transactionCompleteTime = self._absTimeNow + self.transferTime
             while transactionCompleteTime < targetTime and self._remoteFifo._curSize > 0 and not timeout:
                 hit = self._remoteFifo.Read()
                 i = self.config.DirMask.value
                 sendT = self.UpdateTime(transactionCompleteTime, i, isTx=True)
                 hitlist.append((
                         self.connections[i].asic,
-                        (i + 2) % 4,
+                        AsicDirMask((i + 2) % 4),
                         hit,
                         sendT,
                     ))
@@ -944,7 +945,7 @@ class QPixAsic:
                 """
                 if self.txBusy > T - self.transTime:
                     if self.asic is not None:
-                        print(f"WARNING sending to ({self.asic.row},{self.asic.col}) on busy connection")
+                        # print(f"WARNING sending to ({self.asic.row},{self.asic.col}) on busy connection")
                         return True
                     else:
                         print("WARNING sending on busy none asic")
@@ -960,6 +961,26 @@ class QPixAsic:
                     print("WARNING receiving on busy connection")
                 else:
                     self.rxBusy = T
+
+@dataclass
+class DaqData:
+    """
+    DaqNode stores data in this format once it's received via ReceiveByte
+    as a QPByte. DaqNode stores a list (FIFO buffer equiv.) of this data.
+    Params:
+    refTimestamp - DaqNode's 32 bit reference timestamp
+    wordtype - Type of the QPByte received
+    srcAsicRow - Source Asic Row
+    srcAsicCol - Source Asic Col
+    QPByte - misc data class container which can store RegResp / RegData and all AsicWord type
+    NOTE: This dataclass should match the implemention of `QpixDataFormatType`
+    in QpixPkg.vhd
+    """
+    refTimestamp: int
+    wordType: AsicWord
+    srcAsicRow: int
+    srcAsicCol: int
+    qbyte: QPByte
 
 class DaqNode(QPixAsic):
     def __init__(
@@ -979,12 +1000,11 @@ class DaqNode(QPixAsic):
         )
         # new members here
         self.isDaqNode = True
-        self.hitData = {}
-        self.regData = {}
-        self.daqData = {}
-        self.daqHits = 0
+        self._localFifo = self.DaqFifo()
+
         # make sure that the starting daqNode ID is different from the ASIC default
         self._reqID += 1
+        self.received_asics = set()
 
     def ReceiveByte(self, queueItem: ProcItem):
         """
@@ -994,29 +1014,15 @@ class DaqNode(QPixAsic):
         inByte = queueItem.QPByte
         inTime = queueItem.inTime
         inCommand = queueItem.command
-        inWord = inByte.wordType
-        self.daqHits += 1
+        self.UpdateTime(inTime)
 
-        # how a DAQNode records and stores data to its local FIFO
-        AsicKey = f"({inByte.originRow}, {inByte.originCol})"
-        if AsicKey not in self.daqData:
-            self.daqData[AsicKey] = []
-
-        self.UpdateTime(queueItem.inTime)
-        self._localFifo.Write(inByte)
-
-        # Put all of the attributes of the QPByte into a list
-        if inWord == AsicWord.DATA:
-            self.hitData[AsicKey].append((self.relTicksNow, inByte))
-        elif inWord == AsicWord.REGRESP:
-            self.regData[AsicKey].append((self.relTicksNow, inByte))
-        elif inWord == AsicWord.EVTEND:
-            pass
-        else:
-            print(
-                f"WARNING! there is no associated wordType with this byte {inWord} @ {AsicKey}"
-            )
-        self.daqData[AsicKey].append((self.relTicksNow, inByte))
+        # store byte data into DaqNode local FIFO
+        wordType = inByte.wordType
+        row = inByte.originRow
+        col = inByte.originCol
+        d = DaqData(self.relTicksNow, wordType, row, col, inByte)
+        self._localFifo.Write(d)
+        self.received_asics.add((row, col)) 
 
         if self._debugLevel > 0:
             print(f"DAQ-{self.relTicksNow} ", end=" ")
@@ -1029,3 +1035,36 @@ class DaqNode(QPixAsic):
             print(f"tDiff (ns): {(self.relTimeNow-inTime)*1e9:2.2f}")
 
         return []
+
+    class DaqFifo(QPFifo):
+        """
+        DaqFifo works like normal QPFifo but stores different state
+        """
+        def __init__(self):
+            super().__init__()
+            self._dataWords = 0
+
+        def Write(self, data:DaqData) -> int:
+            if not isinstance(data, DaqData):
+                raise QPException("Can not add this data-type to the DaqNode local FIFO!")
+
+            self._data.append(data)
+            self._curSize += 1
+            self._totalWrites += 1
+            if data.wordType == AsicWord.DATA:
+                self._dataWords += 1
+
+            if self._curSize > self._maxSize:
+                self._maxSize = self._curSize
+
+            if self._curSize > self._maxDepth:
+                self._full = True
+
+            return self._curSize
+
+        def Read(self) -> DaqData:
+            if self._curSize > 0:
+                self._curSize -= 1
+                return self._data.pop(0)
+            else:
+                return None

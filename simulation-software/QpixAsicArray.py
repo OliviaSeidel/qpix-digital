@@ -90,8 +90,8 @@ def heatMap(data, rows, cols, header="", ax=None, cbarlabel="", cbar_kw={}, **kw
                     labeltop=True, labelbottom=False)
 
     # Loop over data dimensions and create text annotations.
-    for i in range(cols):
-        for j in range(rows):
+    for i in range(rows):
+        for j in range(cols):
             text = ax.text(j, i, data[i][j],
                         ha="center", va="center", color="w")
 
@@ -308,12 +308,8 @@ class QpixAsicArray():
          # Make the array and connections
         self._asics = self._makeArray(timeout=timeout, randomRate=hitsPerSec)
         self._daqNode = DaqNode(fOsc = self.fNominal, nPixels = 0, debugLevel=self._debugLevel, timeout=timeout, randomRate=hitsPerSec)
-        for asic in self:
-            self._daqNode.hitData[f'({asic.row}, {asic.col})'] = []
-            self._daqNode.regData[f'({asic.row}, {asic.col})'] = []
 
         self._asics[0][0].connections[AsicDirMask.West.value].asic = self._daqNode
-        print("setting daq node dir to:", AsicDirMask.West.value)
 
         self._alert = 0
 
@@ -343,7 +339,6 @@ class QpixAsicArray():
         for i in range(self._nrows):
             for j in range(self._ncols):
                 frq = random.gauss(self.fNominal,self.fNominal*self.pctSpread)
-
                 matrix[i].append(QPixAsic(frq, self._nPixs, row=i, col=j, debugLevel=self._debugLevel, timeout=timeout, randomRate=randomRate))
                 
                 if self._debugLevel > 0:
@@ -456,7 +451,7 @@ class QpixAsicArray():
             self._daqNode._reqID += 1
         else:
             request = byte
-        self._queue.AddQueueItem(self[0][0], 3, request, self._timeNow, command=command)
+        self._queue.AddQueueItem(self[0][0], AsicDirMask(3), request, self._timeNow, command=command)
 
         # move the Array forward in time
         self._Process(timeEnd)
@@ -493,12 +488,12 @@ class QpixAsicArray():
         PROCITEM = 0
         while(self._timeNow < timeEnd):
 
-            for asic in self:
-                newProcessItems = asic.Process(self._timeNow - self._timeEpsilon)
-                if newProcessItems:
-                    self._alert = 1
-                    for item in newProcessItems:
-                        self._queue.AddQueueItem(*item)
+            # for asic in self:
+            #     newProcessItems = asic.Process(self._timeNow - self._timeEpsilon)
+            #     if newProcessItems:
+            #         self._alert = 1
+            #         for item in newProcessItems:
+            #             self._queue.AddQueueItem(*item)
 
             # process transactions
             while(self._queue.Length() > 0):
@@ -523,7 +518,7 @@ class QpixAsicArray():
                     for item in newProcessItems:
                         self._queue.AddQueueItem(*item)
 
-                p2 = self._ProcessArray(hitTime)
+                # p2 = self._ProcessArray(hitTime)
 
             self._timeNow += self._deltaT
             self._tickNow += self._deltaTick

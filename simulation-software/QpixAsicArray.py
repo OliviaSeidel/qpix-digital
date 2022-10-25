@@ -99,7 +99,7 @@ def heatMap(data, rows, cols, header="", ax=None, cbarlabel="", cbar_kw={}, **kw
 
     return im, cbar
 
-def viewAsicState(qparray, time_begin=-100e-9, time_end=300e-6):
+def viewAsicState(qparray, time_begin=-100e-9, time_end=300e-6, ordering="Normal"):
     """
     viewing function to take in a processed QpixArray class.
 
@@ -114,19 +114,40 @@ def viewAsicState(qparray, time_begin=-100e-9, time_end=300e-6):
         color_mapping[state] = f"C{state.value}"
 
     asics = []
-    for asic in qparray:
-        asics.append(asic)
+    # normal ordering
+    if ordering == "Normal":
+        for asic in qparray:
+            asics.append(asic)
+    # order main column on bottom followed by other rows
+    elif ordering.lower() == "left":
+        colAsics = [a for a in qparray if a.col == 0]
+        rowAsics = [a for a in qparray if a.col != 0]
+        asics.extend(colAsics)
+        asics.extend(rowAsics)
+    elif ordering.lower() == "snake":
+        for i in range(qparray._nrows):
+            for j in range(qparray._ncols):
+                if i%2 == 0:
+                    asics.append(qparray[i][j])
+                else:
+                    asics.append(qparray[i][(qparray._ncols - 1) - j])
+    # attempt to order in the perceived shorted broadcast distance
+    else:
+        r, c = qparray._nrows, qparray._ncols
+        for i in range(r+c):
+            dAsics = sorted([a for a in qparray if a.row+a.col == i], reverse=True)
+            asics.extend(dAsics)
 
     # unpack the data into arrays of states and times
     states = [[] for i in range(len(asics))]
     relTimes = [[] for i in range(len(asics))]
     for i, asic in enumerate(asics):
-        for (state, relTime, _) in asic.state_times:
+        for (state, _, relTime) in asic.state_times:
             states[i].append(state)
             relTimes[i].append(relTime)
 
     # make the graph 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(figsize=(15, 0.2*(qparray._ncols * qparray._nrows)))
     ax.set_ylim(0.5, len(asics)+3)
 
     # repack the data into a viewable format for barh
@@ -298,6 +319,7 @@ class QpixAsicArray():
         self.pctSpread = pctSpread
         self.RouteState = None
         self.push_state = False
+        self.send_remote = False
 
         # the array also manages all of the processing queue times to use
         self._queue = ProcQueue()
@@ -390,7 +412,7 @@ class QpixAsicArray():
         t2 = self._timeNow + interval
         calibrateSteps = self._Command(t2, command="Calibrate")
 
-    def Interrogate(self, interval=0.1):
+    def Interrogate(self, interval=0.1, hard=False):
         """
         Function for issueing command to base node from daq node, and beginning
         a full readout sequence of timestamp data.
@@ -398,11 +420,15 @@ class QpixAsicArray():
         VARS:
             interval - how often the daq interrogates the asics
             duration - how long the simulation will run for
+            hard     - bool: if true, force remote ASICs to enter into transmit local state no matter what
         """
         
         self._alert=0
         time = self._timeNow + interval
-        readoutSteps = self._Command(time, command="Interrogate")
+        if hard:
+            readoutSteps = self._Command(time, command="HardInterrogate")
+        else:
+            readoutSteps = self._Command(time, command="Interrogate")
 
     def WriteAsicRegister(self, row, col, config, timeEnd=1e-3):
         """
@@ -454,7 +480,7 @@ class QpixAsicArray():
         self._queue.AddQueueItem(self[0][0], AsicDirMask(3), request, self._timeNow, command=command)
 
         # move the Array forward in time
-        self._Process(timeEnd)
+        self.Process(timeEnd)
 
         return self._queue.processed
 
@@ -475,7 +501,7 @@ class QpixAsicArray():
                         self._queue.AddQueueItem(*item)
         return processed
 
-    def _Process(self, timeEnd):
+    def Process(self, timeEnd):
         """
         Main logic function to move the all ASICs within the Array forward in
         time to timeEnd.
@@ -486,14 +512,16 @@ class QpixAsicArray():
         """
         steps = 0
         PROCITEM = 0
+        self._procAsics = [asic for asic in self]
         while(self._timeNow < timeEnd):
 
-            # for asic in self:
-            #     newProcessItems = asic.Process(self._timeNow - self._timeEpsilon)
-            #     if newProcessItems:
-            #         self._alert = 1
-            #         for item in newProcessItems:
-            #             self._queue.AddQueueItem(*item)
+            dT = self._timeNow - self._timeEpsilon
+            for asic in self._procAsics:
+                newProcessItems = asic.Process(dT)
+                if newProcessItems:
+                    self._alert = 1 # this is not really a problem
+                    for item in newProcessItems:
+                        self._queue.AddQueueItem(*item)
 
             # process transactions
             while(self._queue.Length() > 0):
@@ -509,8 +537,7 @@ class QpixAsicArray():
                 asic = nextItem.asic
                 hitTime = nextItem.inTime
 
-                # ASICs to catch up to this time, and to send data
-                p1 = self._ProcessArray(hitTime)
+                p1 = self._ProcessArray(hitTime-self._timeEpsilon)
 
                 # ASIC to receive data
                 newProcessItems = asic.ReceiveByte(nextItem)
@@ -518,10 +545,29 @@ class QpixAsicArray():
                     for item in newProcessItems:
                         self._queue.AddQueueItem(*item)
 
-                # p2 = self._ProcessArray(hitTime)
+                # ASICs to catch up to this time, and to send data
+                p1 = self._ProcessArray(hitTime)
 
-            self._timeNow += self._deltaT
-            self._tickNow += self._deltaTick
+                # Speed up logic! What kinds of ASIC configuration can generate a 
+                # byte transfer via processing only
+                if self._queue._entries == 0:
+                    if self.push_state == True:
+                        self._procAsics = [asic for asic in self if len(asic._times) > 0]
+                    else:
+                        self._procAsics = [asic for asic in self if (
+                                    asic.state == AsicState.Finish or
+                                    asic.state == AsicState.TransmitLocal or 
+                                    (asic._remoteFifo._curSize > 0 and 
+                                        (asic.state == AsicState.TransmitRemote or 
+                                        asic.state == AsicState.TransmitRemoteFull or
+                                        asic.config.SendRemote == True
+                                        )))
+                                ] 
+
+            self._timeNow = self[0][0]._absTimeNow if self._timeNow < self[0][0]._absTimeNow else self._timeNow + self._deltaT
+            self._tickNow = int(self._timeNow * self.fNominal) + 1
+
+        return
 
     def SetPushState(self, enabled=True, transact=False):
         """
@@ -540,6 +586,26 @@ class QpixAsicArray():
             else:
                 asic.config = config
 
+        # a pushed ASIC should be in the send remote state
+        self.SetSendRemote(enabled, transact)
+
+    def SetSendRemote(self, enabled=True, transact=False):
+        """
+        This function will send a ASIC configuration write to all ASICs
+        enabling the PushState
+        """
+        assert isinstance(enabled, bool), "must supply boolean state to enable to ASICs"
+
+        self.send_remote = enabled
+
+        for asic in self:
+            config = asic.config
+            config.SendRemote = enabled
+            if transact:
+                self.WriteAsicRegister(asic.row, asic.col, config)
+            else:
+                asic.config = config
+
     def IdleFor(self, interval=0.5):
         """
         Function will move the array forward by this time. This is meant
@@ -550,7 +616,7 @@ class QpixAsicArray():
         interval - time in seconds to move the array forward
         """
         timeEnd = self._timeNow + interval
-        self._Process(timeEnd)
+        self.Process(timeEnd)
 
     def Route(self, route=None, timeout=None, transact=True):
         '''

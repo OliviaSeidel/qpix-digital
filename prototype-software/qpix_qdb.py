@@ -780,7 +780,7 @@ class QPIX_GUI(QMainWindow):
     def closeEvent(self, event):
         found = os.path.isfile(SAQ_BIN_FILE)
         if found and hasattr(self, "_outputFile"):
-            subprocess.Popen(["python", "test_root.py", SAQ_BIN_FILE, self._outputFile])
+            subprocess.Popen(["python", "make_root.py", SAQ_BIN_FILE, self._outputFile])
         self.close.emit()
 
     ###########################

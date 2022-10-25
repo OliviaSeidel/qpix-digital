@@ -69,6 +69,7 @@ def tProcRegReq(qpix_array):
     tAsic = qpix_array[0][0]
     tRegReqByte = QpixAsic.QPByte(AsicWord.REGREQ, None, None, ReqID=2)
     tProcRegReq = QpixAsic.ProcItem(tAsic, 0, tRegReqByte, 0)
+    tProcRegReq.dir = QpixAsic.AsicDirMask.West
     return tProcRegReq
 
 @pytest.fixture
@@ -157,22 +158,31 @@ def test_asic_process_push(qpix_array):
     """
     TODO: test various injectHits and process conditions
     """
-    tAsic = qpix_array[0][0]
-    endTime = deltaT*1000
-    hits = np.arange(0, endTime, endTime/100.)
-    tAsic.InjectHits(hits)
-    assert len(tAsic._times) == len(hits), "all hits did not get injected"
-    nHits = 0
-    curT = deltaT
+    qpix_array.Route("Left", transact=False)
+    qpix_array.SetPushState(enabled=True, transact=False)
+    endtime, nHits = 1, 10
+    inHits = sorted(np.random.uniform(0, endtime, nHits))
 
-    # push should allow all of the hits to come through
-    tAsic.config.EnablePush = True
-    while curT < endTime + deltaT*5 or tAsic._localFifo._curSize > 0:
-        nHits += len(tAsic.Process(curT))
-        curT += deltaT
-    assert tAsic._localFifo._curSize == 0, f"Local FIFO should be empty of hits, total hits {len(hits)}"
-    size = len(hits)
-    assert tAsic._localFifo._totalWrites == size, f"each hit not in local FIFO, remaining: {len(tAsic._times)}"
+    # inject
+    for asic in qpix_array:
+        asic.InjectHits(inHits)
+
+    # process
+    curT = 0
+    while curT < endtime:
+        curT += qpix_array._deltaT
+        qpix_array.Process(curT)
+
+    for asic in qpix_array:
+        assert asic._localFifo._curSize == 0, f"pushed Local FIFO should be empty of hits"
+
+    words = [word for word in qpix_array._daqNode._localFifo._data]
+    nDataWords = [word for word in words if word.wordType == AsicWord.DATA]
+
+    r, c = qpix_array._ncols, qpix_array._nrows
+    tHits = r * c * len(inHits)
+    assert len(nDataWords) == tHits, f"DaqNode did not receive all of the data words {nDataWords}/{tHits}"
+
 
 def test_asic_updateTime(qpix_array):
     tAsic = qpix_array[0][0]
@@ -230,51 +240,60 @@ def test_asic_full_readout(qpix_array):
     tRegReqByte = QpixAsic.QPByte(AsicWord.REGREQ, None, None, ReqID=2)
     proc = QpixAsic.ProcItem(tAsic, QpixAsic.AsicDirMask.North, tRegReqByte, inTime, command="Interrogate")
     _ = tAsic.ReceiveByte(proc)
-    tAsic.Process(tAsic._absTimeNow)
+    h = tAsic.Process(inTime)
 
     # transmit local
     prevState = tAsic.state
-    eT = inTime + tAsic.transferTime
+    eT = tAsic._absTimeNow
     dT = tAsic._absTimeNow
     assert prevState == AsicState.TransmitLocal, "should begin transmitting local data after receiving an Interrogate"
     fifoHits = tAsic._localFifo._curSize
+    hs = []
     while fifoHits > 0:
         dT += deltaT
-        _ = tAsic.Process(dT)
+        h = tAsic.Process(dT)
+        hs.extend(h)
         fifoHits = tAsic._localFifo._curSize
 
     # transmit finish word
-    eT += tAsic.transferTime * nHits
+    eT += sum([tAsic.tOsc * h[2].transferTicks for h in hs])
     prevState = tAsic.state
     assert prevState == AsicState.Finish, "finish state should follow sending all local data"
     nFinish, procs = 0, 0
+    hits = []
     while tAsic.state == prevState:
         dT = tAsic._absTimeNow + deltaT
-        nFinish += len(tAsic.Process(dT))
+        l = tAsic.Process(dT)
+        nFinish += len(l)
+        hits.extend(l)
         procs += 1
-    eT += tAsic.transferTime * 1
+    times = [tAsic.tOsc * hit[2].transferTicks for hit in hits]
+    eT += sum(times)
+    assert round(eT, 6) == round(tAsic._absTimeNow, 6), "Incorrect expected time during finish word"
 
     # transmit remote state, should be length of timeout
     prevState = tAsic.state
     assert prevState == AsicState.TransmitRemote, "Remote state should follow end word"
-    nRemote, procs = 0, 0
+    nRemote = 0
     while tAsic.state == prevState:
         dT = tAsic._absTimeNow + deltaT
         nRemote += len(tAsic.Process(dT))
-        procs += 1
 
     # back to IDLE state
     eT += tAsic.tOsc * tAsic.config.timeout
     prevState = tAsic.state
     assert prevState == AsicState.Idle, "Finished state should be back in IDLE"
-    assert round(eT, 6) == round(tAsic._absTimeNow, 6), "Different expected process times during Final step of full readout"
+    if tAsic._remoteFifo._totalWrites > 0:
+        assert round(eT, 6) <= round(tAsic._absTimeNow, 6), "Different expected process times during Final step of full readout"
+    else:
+        assert round(eT, 6) == round(tAsic._absTimeNow, 6), "Different expected process times during Final step of full readout"
 
 def test_process_array(qpix_array):
     """
     Ensure that the Hidden ProcessArray method for qpix_array behaves as expected
     """
     time_end = 1
-    qpix_array._Process(time_end)
+    qpix_array.Process(time_end)
     assert qpix_array._timeNow - qpix_array._deltaT < time_end, "Process array too far forward in time"
     assert qpix_array._alert != 1, "alert thrown during normal process"
 
@@ -376,13 +395,25 @@ def ensure_hits(hits, array):
 
     # make sure that all of the ASIC FIFOs are empty
     for hit, asic in zip(hits, array):
-        msg = f"({asic.row},{asic.col})"
-        warn(asic._localFifo._curSize == 0, f"Asic {msg} local fifo not empty!")
-        warn(asic._remoteFifo._curSize == 0, f"Asic {msg} remote fifo not empty!")
-        warn(len(asic._localFifo._data) == 0, f"Asic {msg} local fifo not counting reads correctly")
-        warn(len(asic._remoteFifo._data) == 0, f"Asic {msg} remote fifo not counting reads correctly")
-        warn(len(asic._times) == 0, f"some ASIC {msg} times have NOT been read!")
-        warn(asic._localFifo._totalWrites == len(hit), f"{msg} not all hits counted as writes")
+        msg = f"ASIC ({asic.row},{asic.col}):"
+        bWarn = False
+        if asic._localFifo._curSize != 0:
+            msg += f" local fifo not empty!"
+            bWarn = True
+        if asic._remoteFifo._curSize != 0:
+            msg += f" remote fifo not empty!"
+            bWarn = True
+        if len(asic._localFifo._data) != 0:
+            msg += f" local fifo not counting reads correctly"
+            bWarn = True
+        if len(asic._remoteFifo._data) != 0:
+            msg += f" remote fifo not counting reads correctly"
+            bWarn = True
+        if len(asic._times) != 0:
+            msg += f" times have NOT been read!"
+            bWarn = True
+        assert asic._localFifo._totalWrites == len(hit), f"{msg} not all hits counted as writes"
+    warn(bWarn, msg)
 
     maxTime, nHits = 0, 0
     for hit in hits:
@@ -390,7 +421,6 @@ def ensure_hits(hits, array):
             nHits += len(hit)
             maxTime = np.max(hit) if np.max(hit) > maxTime else maxTime
     daqHits = array._daqNode._localFifo._dataWords
-    warn(daqHits == nHits, f"DaqNode did not receive all hits before {maxTime}: {daqHits}/{nHits}")
     evt_end_words = 0
     for asic in array:
         for (state, _, _) in asic.state_times:
@@ -400,7 +430,16 @@ def ensure_hits(hits, array):
     for data in array._daqNode._localFifo._data:
         if data.wordType == AsicWord.EVTEND:
             daq_evt_ends += 1
-    assert daq_evt_ends == evt_end_words, f"mismatch on total event end words on daq node"
+
+    msg = "DaqNode warning:"
+    bWarn = False
+    if daqHits != nHits:
+        msg += f"\nDaqNode did not receive all hits before {maxTime}: {daqHits}/{nHits}"
+        bWarn = True
+    if daq_evt_ends != evt_end_words:
+        bWarn = True
+        msg += f"mismatch on total event end words on daq node"
+    warn(bWarn, msg)
 
     return 1
 
@@ -412,7 +451,7 @@ def run_array_interrogate(array, maxTime, int_prd):
     dT = 0
     t_remote, t_local = 0, 0
     tr_remote, tr_local = 0, 0
-    while dT <= maxTime+int_prd*50:
+    while dT <= maxTime+int_prd*10:
         dT += int_prd
         array.Interrogate(int_prd)
         t_remote, t_local = 0, 0
@@ -422,6 +461,8 @@ def run_array_interrogate(array, maxTime, int_prd):
             t_local += asic._localFifo._curSize
             tr_remote += asic._remoteFifo._totalWrites
             tr_local += asic._localFifo._totalWrites
+
+    assert array._queue.Length() == 0, "Still processing to happen.."
 
     return array
 
@@ -442,32 +483,37 @@ def test_daq_read_data_snake(qpix_array, qpix_hits, int_prd=0.5):
             asic.InjectHits(hit)
 
     # run the interrogate procedure
-    qpix_array = run_array_interrogate(qpix_array, maxTime, int_prd)
+    qpix_array = run_array_interrogate(qpix_array, maxTime, 0.5)
 
     # compare fifos with expected input hits
     ensure_hits(qpix_hits, qpix_array)
     
     # snake means every ASIC is connected in a long line and should see every # other ASIC
-    asicCnt, transactions = 0, 0
     if rows%2 == 0:
         cur_asic = qpix_array[rows-1][0]
     else:
         cur_asic = qpix_array[rows-1][cols-1]
+
+    asicCnt, transactions = 0, 0
     while asicCnt < rows*cols:
-        transactions += cur_asic._localFifo._totalWrites
-        evt_end_words = 0
+
+        transactions += (cur_asic._localFifo._totalWrites - cur_asic._localFifo._curSize)
         for (state, _, _) in cur_asic.state_times:
             if state == AsicState.Finish:
-                evt_end_words += 1
-        transactions += evt_end_words
+                transactions += 1
+        transactions -= cur_asic._remoteFifo._curSize
+
         asicCnt += 1
         next_asic = cur_asic.connections[cur_asic.config.DirMask.value].asic
         if next_asic.isDaqNode:
             break
-        remote_writes = next_asic._remoteFifo._totalWrites 
-        msg = f"trans. cnt error @ ({next_asic.row},{next_asic.col}) ({transactions}-{evt_end_words})/{remote_writes}"
+
+        remote_writes = next_asic._remoteFifo._totalWrites
+        msg = f"snake trans. cnt error @ ({next_asic.row},{next_asic.col}) {transactions}/{remote_writes}"
         assert remote_writes == transactions, msg
+
         cur_asic = next_asic
+
     assert asicCnt == rows*cols, "didnt count all ASICs"
 
 def test_daq_read_data_left(qpix_array, qpix_hits, int_prd=0.5):
@@ -507,118 +553,77 @@ def test_daq_read_data_left(qpix_array, qpix_hits, int_prd=0.5):
             if next_asic.isDaqNode:
                 break
 
-            transactions += cur_asic._localFifo._totalWrites
+            transactions += (cur_asic._localFifo._totalWrites - cur_asic._localFifo._curSize)
             for(state, _, _) in cur_asic.state_times:
                 if state == AsicState.Finish:
                     transactions += 1
+            transactions -= cur_asic._remoteFifo._curSize
             
             # test transactions for this ASIC
             if next_asic.col == 0:
                 south_asic = next_asic.connections[AsicDirMask.South.value].asic
                 if south_asic is not None:
-                    transactions += south_asic._remoteFifo._totalWrites
-                    transactions += south_asic._localFifo._totalWrites
+                    transactions += (south_asic._remoteFifo._totalWrites - south_asic._remoteFifo._curSize)
+                    transactions += (south_asic._localFifo._totalWrites - south_asic._localFifo._curSize)
                     for(state, _, _) in south_asic.state_times:
                         if state == AsicState.Finish:
                             transactions += 1
 
             frac = f"{transactions}/{next_asic._remoteFifo._totalWrites}"
-            msg = f"trans. cnt error @ ({next_asic.row},{next_asic.col}) {frac}"
+            msg = f"left trans. cnt error @ ({next_asic.row},{next_asic.col}) {frac}"
             assert next_asic._remoteFifo._totalWrites == transactions, msg
 
             col = next_asic.col
 
+# Deprecated
+# def test_daq_calibrate(qpix_array, qpix_hits, int_prd=0.5):
+#     """
+#     Test readout calibration period with incoming hits to try to reconstruct hits at DaqNode
+#     """
+#     rows, cols = qpix_array._nrows, qpix_array._ncols
+#     r = "Left"
+#     qpix_array.Route(r, transact=False)
+
+#     maxTime = 0
+#     for hit, asic in zip(qpix_hits, qpix_array):
+#         if len(hit) > 0:
+#             maxTime = np.max(hit) if maxTime < np.max(hit) else maxTime 
+#             asic.InjectHits(hit)
+
+#     # attempt calibrate / interrogate procedure to reconstruct hit times
+#     qpix_array.Calibrate(1)
+#     qpix_array.Calibrate(1)
+#     qpix_array.Calibrate(1)
+
+def test_asic_tick_cnt(qpix_array):
+    """
+    ensure that an injected hit calculates that correct time
+    """
+    tAsic = qpix_array[0][0]
+    tHits, nHits = 1e-3, 5
+    inTime = tHits + qpix_array._deltaT
+    inHits = sorted(np.random.uniform(0, tHits, nHits))
+    tAsic.InjectHits(inHits)
+    tRegReqByte = QpixAsic.QPByte(AsicWord.REGREQ, None, None, ReqID=2)
+    proc = QpixAsic.ProcItem(tAsic, QpixAsic.AsicDirMask.West, tRegReqByte, inTime, command="Interrogate")
+    testT = 1
+    tAsic.Process(testT)
+    b = tAsic.ReceiveByte(proc)
+    procTime = inTime + 1e-3 + testT
+    outHits = tAsic.Process(procTime)
+    assert len(outHits) == len(inHits), "Did not read all of the injected hits"
+    for inHit, outHit in list(zip(inHits, outHits)):
+        assert inHit == outHit[2].data, "input hit did not get correctly stored in out hit data"
+        tick = int((inHit - tAsic._startTime)/tAsic.tOsc) + 1
+        assert tick == outHit[2].timeStamp, "input timestamp was not calcuated correctly"
+
 if __name__ == "__main__":
+
     qpix_array = QpixAsicArray.QpixAsicArray(
                 nrows=tRows, ncols=tCols, nPixs=nPix,
                 fNominal=fNominal, pctSpread=pctSpread, deltaT=deltaT,
                 timeEpsilon=timeEpsilon, timeout=timeout,
                 hitsPerSec=hitsPerSec, debug=debug, tiledf=tiledf)
 
-    rows, cols = qpix_array._nrows, qpix_array._ncols
-    r = "Left"
-    qpix_array.Route(r, transact=False)
-    int_prd = 0.5
-
-    qpix_hits = []
-    for asic in qpix_array:
-        nHits = np.random.randint(13)
-        qpix_hits.append(np.random.uniform(0,10,nHits))
-
-    maxTime = 0
-    for hit, asic in zip(qpix_hits, qpix_array):
-        if len(hit) > 0:
-            maxTime = np.max(hit) if maxTime < np.max(hit) else maxTime 
-            asic.InjectHits(hit)
-
-    # run the interrogate procedure
-    dT = 0
-    t_remote, t_local = 0, 0
-    tr_remote, tr_local = 0, 0
-    while dT <= maxTime+int_prd*10:
-        dT += int_prd
-        qpix_array.Interrogate(int_prd)
-        t_remote, t_local = 0, 0
-        tr_remote, tr_local = 0, 0
-        for asic in qpix_array:
-            t_remote += asic._remoteFifo._curSize
-            t_local += asic._localFifo._curSize
-            tr_remote += asic._remoteFifo._totalWrites
-            tr_local += asic._localFifo._totalWrites
-
-
-    # compare fifos with expected input hits
-    nHits = 0
-    for hit in qpix_hits:
-        if len(hit) > 0:
-            nHits += len(hit)
-
-    daqHits = qpix_array._daqNode._localFifo._dataWords
-    evt_end_words = 0
-    for asic in qpix_array:
-        for (state, _, _) in asic.state_times:
-            if state == AsicState.Finish:
-                evt_end_words += 1
-    daq_evt_ends = 0
-    for data in qpix_array._daqNode._localFifo._data:
-        if data.wordType == AsicWord.EVTEND:
-            daq_evt_ends += 1
-    assert daq_evt_ends == evt_end_words, f"mismatch on total event end words on daq node"
-
-    # left means every left and not 0,0 ASIC sends data north, all others send west
-    # each row should be summed individually
-    for row in reversed(range(rows)):
-
-        transactions = 0
-        col = qpix_array._ncols - 1
-
-        while col > 0:
-
-            cur_asic = qpix_array[row][col]
-            next_asic = cur_asic.connections[cur_asic.config.DirMask.value].asic
-
-            if next_asic.isDaqNode:
-                break
-
-            transactions += cur_asic._localFifo._totalWrites
-            for(state, _, _) in cur_asic.state_times:
-                if state == AsicState.Finish:
-                    transactions += 1
-            
-            # test transactions for this ASIC
-            if next_asic.col == 0:
-                south_asic = next_asic.connections[AsicDirMask.South.value].asic
-                if south_asic is not None:
-                    transactions += south_asic._remoteFifo._totalWrites
-                    transactions += south_asic._localFifo._totalWrites
-                    for(state, _, _) in south_asic.state_times:
-                        if state == AsicState.Finish:
-                            transactions += 1
-
-            frac = f"{transactions}/{next_asic._remoteFifo._totalWrites}"
-            msg = f"trans. cnt error @ ({next_asic.row},{next_asic.col}) {frac}"
-            assert next_asic._remoteFifo._totalWrites == transactions, msg
-
-            col = next_asic.col
 
     input("test")

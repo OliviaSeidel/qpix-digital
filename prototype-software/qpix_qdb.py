@@ -25,7 +25,7 @@ import subprocess
 class dialogWindow(QDialog):
     """
     QDialog class which provides check boxes to choose to accept triggers for
-    specified channels.  default is OFF, and checks indicate that the
+    specified channels.  default is ON, and checks indicate that the
     corresponding channel will allow a reset to trigger.
     """
 
@@ -35,7 +35,7 @@ class dialogWindow(QDialog):
         super().__init__()
 
         self.setWindowTitle("SAQ Mask")
-        size = 15
+        size = 16
         QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
 
         self.buttonBox = QDialogButtonBox(QBtn)
@@ -49,6 +49,7 @@ class dialogWindow(QDialog):
         self.checkBoxes = []
         for i in range(size):
             p = QCheckBox(f"Channel - {i+1}")
+            p.setChecked(True)
             self.checkBoxes.append(p)
             self.layout.addWidget(p)
 

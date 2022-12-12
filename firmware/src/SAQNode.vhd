@@ -65,7 +65,7 @@ architecture Behavioral of SAQNode is
 
   -- SAQ Ctrl signals
   signal saqCtrlOutValid : sl := '0';
-  signal saqCtrlDataOut : slv(N_SAQ_PORTS + TIMESTAMP_BITS - 1 downto 0);
+  signal saqCtrlDataOut  : slv(N_SAQ_PORTS + TIMESTAMP_BITS - 1 downto 0);
   constant emtpy_bits    : slv(64 - N_SAQ_PORTS - TIMESTAMP_BITS - 1 downto 0) := (others => '0');
 
   -- FIFO connection signals

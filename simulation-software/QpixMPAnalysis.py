@@ -136,9 +136,9 @@ def main(seed=2):
     # define the ranges of parameters to test
     int_periods = [0.2, 0.5, 0.75, 1, 2]
     nHardInt = [5, 10, 20]
-    periods = [(i,j) for i in int_periods for j in nHardInt]
     routes = ["left", "snake"]
     timeouts = [0, 15e3, 15e4, 15e5]
+    periods = [(i,j) for i in int_periods for j in nHardInt]
     ncpu = 20
 
     # place holder for the completed tiles

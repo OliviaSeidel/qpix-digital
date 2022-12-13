@@ -3,19 +3,39 @@ import sys
 
 import numpy as np
 import struct
+import datetime
+import argparse
 from array import array
 
 from qdb_interface import PACKET_HEADER, EXIT_PACKET
 
-def main():
+def main(input_file, output_file, version, start_hits, triggers):
     """
-    only run this as a script
+    this script should be run from a selection within the GUI
     """
 
-    # create ROOT file
-    tf = ROOT.TFile("new_root.root", "RECREATE")
+    # create dest ROOT file
+    tf = ROOT.TFile(output_file, "RECREATE")
+
+    # use this to store the relevant meta tree information about the run
+    meta_tt = ROOT.TTree("mt", "metaTree")
+    date = array('I', [0])
+    version = array('I', [version])
+    start_hits = array('I', [start_hits])
+    triggers = array('I', [triggers])
+
+    today = datetime.date.today()
+    date = ROOT.std.string(f"{today.month:02}:{today.day:02}:{today.year:04}")
+    meta_tt.Branch("Date", date)
+    meta_tt.Branch("Version", version, "version/I")
+    meta_tt.Branch("start_hits", start_hits, "start_hits/I")
+    meta_tt.Branch("Triggers", triggers, "triggers/I")
+
+    # assign meta variables and fill before save
+    meta_tt.Fill()
+
+    # create and build the data tree
     tt = ROOT.TTree("tt", "dataTree")
-
     timestamp = array('I', [0])
     chmask = array('H', [0])
     meta = array('H', [0])
@@ -28,7 +48,7 @@ def main():
     hddr_size = len(PACKET_HEADER)
 
     # open binary file
-    with open("saqTmp.bin", "rb") as f:
+    with open(input_file, "rb") as f:
         data = f.read()
 
     i = 0
@@ -56,10 +76,16 @@ def main():
         # packet_id
         i += 2
 
+
     tf.Write()
 
 if __name__ == "__main__":
-    if len(sys.argv) > 1:
-        print("ERROR should only run by default")
+    if len(sys.argv) != 6:
+        print("ERROR should only run by qpix_qdb with required arguments")
     else:
-        main()
+        input_file = sys.argv[1]
+        output_file = sys.argv[2]
+        version = int(sys.argv[3])
+        start_hits = int(sys.argv[4])
+        stop_hits = int(sys.argv[5])
+        main(input_file, output_file, version, start_hits, stop_hits)

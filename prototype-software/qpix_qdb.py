@@ -9,7 +9,7 @@ import time
 from PyQt5 import QtCore
 from PyQt5.QtWidgets import (QWidget, QPushButton, QCheckBox, QSpinBox, QLabel,
                              QDoubleSpinBox, QProgressBar, QTabWidget, QVBoxLayout, QHBoxLayout, QGridLayout, QStatusBar,
-                             QDialog, QDialogButtonBox, QLCDNumber)
+                             QDialog, QDialogButtonBox, QLCDNumber, QFileDialog)
 from PyQt5.QtCore import QProcess, QTimer, pyqtSignal
 from PyQt5.QtGui import QIcon
 from PyQt5.QtWidgets import QApplication, QMainWindow, QAction
@@ -75,10 +75,15 @@ class QPIX_GUI(QMainWindow):
 
         # IO interfaces
         self.qpi = qdb_interface()
-        self.close.connect(self.qpi.finish)
+        self.close.connect(self.qpi.finish) # closes udp worker thread
         self._tf = ROOT.TFile("./test.root", "RECREATE")
         self._tt = ROOT.TTree("qdbData", "data_tree")
         self._saqMask = 0
+
+        # SAQ meta data information
+        self._start_hits = 0
+        self._stop_hits = 0
+        self.version = self.qpi.version
 
         # storage tree setup words
         self._data = {
@@ -663,8 +668,10 @@ class QPIX_GUI(QMainWindow):
         addr = REG.SAQ(SAQReg.SAQ_ENABLE)
         if self.saq_enable.isChecked():
             val = 1
+            self._start_hits = self.getSAQHits()
         else:
             val = 0
+            self._stop_hits = self.getSAQHits()
         self.qpi.regWrite(addr, val)
 
         # enable the SAQ, update the mask, and put that value in the spin box
@@ -778,11 +785,22 @@ class QPIX_GUI(QMainWindow):
         """
         self._mask = 0x0
 
-    def closeEvent(self, event):
+    def SaveData(self, output_file):
+        """
+        this function handles storing a recorded run at a destination output file.
+
+        This should be the only controlling / call function that uses
+        make_root.py to store output data and the metadata tree for SAQ on the
+        Zybo.
+        """
         found = os.path.isfile(SAQ_BIN_FILE)
-        if found and hasattr(self, "_outputFile"):
-            subprocess.Popen(["python", "make_root.py", SAQ_BIN_FILE, self._outputFile])
-        self.close.emit()
+        if not found:
+            print("WARNING unable to find input binary data file!")
+            return
+        else:
+            args = [SAQ_BIN_FILE, output_file, self.version, self._start_hits, self._stop_hits]
+            args = [str(arg) for arg in args]
+            subprocess.Popen(["python", "make_root.py", *args])
 
     ###########################
     ## GUI specific Commands ##
@@ -839,14 +857,40 @@ class QPIX_GUI(QMainWindow):
         menubar.setNativeMenuBar(False)
 
         # exit action
-        exitAct = QAction(QIcon('exit.png'), '&Exit', self)
+        exitAct = QAction(QIcon(), '&Exit', self)
         exitAct.setShortcut('Ctrl+Q')
         exitAct.setStatusTip('Exit application')
         exitAct.triggered.connect(self.close)
 
+        # create a way to save the data collected
+        saveAct = QAction(QIcon(), '&Save', self)
+        saveAct.setShortcut('Ctrl+S')
+        saveAct.setStatusTip('Save Data')
+        saveAct.triggered.connect(self.SaveAs)
+
         # add the actions to the menuBar
         fileMenu = menubar.addMenu('File')
         fileMenu.addAction(exitAct)
+        fileMenu.addAction(saveAct)
+
+    def SaveAs(self):
+        """
+        This function is called when the user selects the save option
+        from the file under the menu bar.
+
+        a dialog window should appear and the user can select the name
+        and location of the output root file to be created.
+        """
+        fileName = QFileDialog.getSaveFileName(self, "Save Data File",
+                                       os.getcwd(),
+                                       ".root")
+
+        # don't double up the root extension
+        if fileName[0][-5:] == ".root":
+            out_file = fileName[0]
+        else:
+            out_file = fileName[0]+".root"
+        self.SaveData(out_file)
 
     def openDialog(self):
         """

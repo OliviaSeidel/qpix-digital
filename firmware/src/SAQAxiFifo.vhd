@@ -73,7 +73,6 @@ architecture Behavioral of SAQAxiFifo is
     constant AXI_DECERR   : std_logic_vector(1 downto 0)  := "11";
     constant FORCE_PACKET : std_logic_vector(31 downto 0) := x"a7007e51";
 
-
     -- write data channel
     signal s_axi_tdata       : std_logic_vector(31 downto 0);
     signal s_axi_tvalid      : std_logic;
@@ -100,8 +99,6 @@ begin  -- architecture Behavioral
 
     -- keep track of the packet length
     uPacketLength <= unsigned(saqPacketLength);
-
-
 
     ----------------------------------------------------------------------------
     -- Write-transaction FSM

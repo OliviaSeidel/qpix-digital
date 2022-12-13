@@ -24,7 +24,7 @@ QP_UDP_PORT = 420
 EXIT_PACKET = bytes("ZaiJian", encoding="utf-8")
 PACKET_HEADER = bytes("HEADER", encoding="utf-8")
 DEFAULT_PACKET_SIZE = 5
-SAQ_BIN_FILE = 'saqTmp.bin'
+SAQ_BIN_FILE = './bin/saqTmp.bin'
 
 # DMA_REG NOTES
 # CTRL NOTE: only lowest bit enables and begins DMA, bit 2 is always high, bit 16 is
@@ -367,6 +367,7 @@ class qdb_interface(QObject):
         super().__init__()
         self._QP_IP = QHostAddress(QP_IP)
         self._QP_PORT = port
+        self.version = 0
         # self._BUFFER_SIZE = BUFFER_SIZE
 
         # storage for retrieiving tcp data
@@ -466,7 +467,7 @@ class qdb_interface(QObject):
         A correct verification performs a successful regRead and regWrite of the
         REG.SCRATCH buffer.
         """
-        version = self.regRead(REG.SCRATCH)
+        self.version = self.regRead(REG.SCRATCH)
         print(f"Running version: 0x{version:08x}.. verifying..", end=" ")
 
         # update and check

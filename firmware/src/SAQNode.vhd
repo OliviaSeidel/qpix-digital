@@ -46,6 +46,7 @@ port (
   valid       : out sl;
   empty       : out sl;
   full        : out sl;
+  
   -- AXI-Stream IO
   S_AXI_0_tdata   : out STD_LOGIC_VECTOR (31 downto 0);
   S_AXI_0_tready  : in  STD_LOGIC;
@@ -66,7 +67,7 @@ architecture Behavioral of SAQNode is
   -- SAQ Ctrl signals
   signal saqCtrlOutValid : sl := '0';
   signal saqCtrlDataOut  : slv(N_SAQ_PORTS + TIMESTAMP_BITS - 1 downto 0);
-  constant emtpy_bits    : slv(64 - N_SAQ_PORTS - TIMESTAMP_BITS - 1 downto 0) := (others => '0');
+  constant empty_bits    : slv(64 - N_SAQ_PORTS - TIMESTAMP_BITS - 1 downto 0) := (others => '0');
 
   -- FIFO connection signals
   signal fifo_valid : sl;
@@ -80,8 +81,8 @@ architecture Behavioral of SAQNode is
   signal fifo_wr_en  : sl;
 
   signal saq_fifo_ren : sl;
-  signal n_saq_hits : unsigned(31 downto 0);
-  
+  signal n_saq_hits : unsigned(31 downto 0) := (others => '0');
+   
   -- s_axi signals
   signal s_axis_tvalid : sl;
   signal s_axis_tready : sl;
@@ -130,7 +131,7 @@ begin  -- architecture SAQNode
     );
 
   fifo_wr_en <= saqCtrlOutValid;
-  fifo_din   <= emtpy_bits & saqCtrlDataOut;
+  fifo_din   <= empty_bits & saqCtrlDataOut;
 
   -- mux the read enable flag based on register transaction
   with saqEnable select fifo_rd_en <=

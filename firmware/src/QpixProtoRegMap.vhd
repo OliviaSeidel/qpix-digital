@@ -13,7 +13,7 @@ entity QpixProtoRegMap is
       X_NUM_G : natural := 3;
       Y_NUM_G : natural := 3;
       Version : std_logic_vector(31 downto 0) := x"0000_0000";
-      N_SAQ_PORTS : natural := 8;
+      N_SAQ_PORTS : natural := 16;
       TIMESTAMP_BITS : natural := 32
    );
    port (

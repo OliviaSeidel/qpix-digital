@@ -43,7 +43,7 @@ def main(input_file, output_file, version, start_hits, triggers):
     meta = array('H', [0])
     pid = array('H', [0])
 
-    tt.Branch("Timestamp", timestamp, "timestamp/I")
+    tt.Branch("Timestamp", timestamp, "timestamp/i")
     tt.Branch("ChMask", chmask, "chan/s")
     tt.Branch("Meta", meta, "meta/s")
     tt.Branch("pid", pid, "pid/s")

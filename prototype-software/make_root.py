@@ -1,5 +1,6 @@
 import ROOT
 import sys
+import os
 
 import numpy as np
 import struct
@@ -24,8 +25,9 @@ def main(input_file, output_file, version, start_hits, triggers):
     start_hits = array('I', [start_hits])
     triggers = array('I', [triggers])
 
-    today = datetime.date.today()
-    date = ROOT.std.string(f"{today.month:02}:{today.day:02}:{today.year:04}")
+    timestamp = os.path.getmtime(input_file)
+    time = datetime.date.fromtimestamp(timestamp).strftime('%m-%d-%Y %H:%M:%S')
+    date = ROOT.std.string(time)
     meta_tt.Branch("Date", date)
     meta_tt.Branch("Version", version, "version/I")
     meta_tt.Branch("start_hits", start_hits, "start_hits/I")

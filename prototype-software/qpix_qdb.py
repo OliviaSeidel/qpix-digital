@@ -1,6 +1,6 @@
 # interfacing dependcies
 from qdb_interface import (AsicREG, AsicCMD, AsicEnable, AsicMask,
-                           qdb_interface, QDBBadAddr, REG, SAQReg, DEFAULT_PACKET_SIZE, SAQ_BIN_FILE)
+                           qdb_interface, QDBBadAddr, REG, SAQReg, DEFAULT_PACKET_SIZE)
 import os
 import sys
 import time
@@ -68,14 +68,14 @@ class dialogWindow(QDialog):
 
 class QPIX_GUI(QMainWindow):
 
-    close = pyqtSignal()
+    close_udp = pyqtSignal()
 
     def __init__(self):
         super(QMainWindow, self).__init__()
 
         # IO interfaces
         self.qpi = qdb_interface()
-        self.close.connect(self.qpi.finish) # closes udp worker thread
+        self.close_udp.connect(self.qpi.finish) # closes udp worker thread
         self._tf = ROOT.TFile("./test.root", "RECREATE")
         self._tt = ROOT.TTree("qdbData", "data_tree")
         self._saqMask = 0
@@ -793,12 +793,13 @@ class QPIX_GUI(QMainWindow):
         make_root.py to store output data and the metadata tree for SAQ on the
         Zybo.
         """
-        found = os.path.isfile(SAQ_BIN_FILE)
+        input_file = self.qpi.worker.output_file
+        found = os.path.isfile(input_file)
         if not found:
             print("WARNING unable to find input binary data file!")
             return
         else:
-            args = [SAQ_BIN_FILE, output_file, self.version, self._start_hits, self._stop_hits]
+            args = [input_file, output_file, self.version, self._start_hits, self._stop_hits]
             args = [str(arg) for arg in args]
             subprocess.Popen(["python", "make_root.py", *args])
 
@@ -872,6 +873,7 @@ class QPIX_GUI(QMainWindow):
         fileMenu = menubar.addMenu('File')
         fileMenu.addAction(exitAct)
         fileMenu.addAction(saveAct)
+
 
     def SaveAs(self):
         """

@@ -53,6 +53,7 @@ def main(input_file, output_file, version, start_hits, triggers):
     with open(input_file, "rb") as f:
         data = f.read()
 
+    fail = False
     i = 0
     while i < len(data):
         hddr = data[i:hddr_size+i]
@@ -61,6 +62,7 @@ def main(input_file, output_file, version, start_hits, triggers):
         found = hddr==PACKET_HEADER
         if not found:
             print("WARNING unable to find packet hddr:", hddr)
+            fail = True
             break
         size = struct.unpack("I", data[i:i+4])[0]
         i += 4
@@ -78,8 +80,11 @@ def main(input_file, output_file, version, start_hits, triggers):
         # packet_id
         i += 2
 
-
     tf.Write()
+
+    # if we read the full binary file correctly, delete it
+    if not fail:
+        os.remove(input_file)
 
 if __name__ == "__main__":
     if len(sys.argv) != 6:

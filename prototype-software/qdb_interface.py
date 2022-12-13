@@ -7,6 +7,7 @@ import sys
 import glob
 from enum import Enum
 import time
+import datetime
 
 # Qt5 dependencies
 import PyQt5
@@ -24,7 +25,6 @@ QP_UDP_PORT = 420
 EXIT_PACKET = bytes("ZaiJian", encoding="utf-8")
 PACKET_HEADER = bytes("HEADER", encoding="utf-8")
 DEFAULT_PACKET_SIZE = 5
-SAQ_BIN_FILE = './bin/saqTmp.bin'
 
 # DMA_REG NOTES
 # CTRL NOTE: only lowest bit enables and begins DMA, bit 2 is always high, bit 16 is
@@ -280,7 +280,12 @@ class saqUDPworker(QObject):
         # create and manage the new thread once running
         self._udpsocket = QUdpSocket(self)
         self._stopped = True
-        self.f = open(SAQ_BIN_FILE, 'wb')
+
+        # don't delete files that have data in them, and are unsaved
+        file = datetime.datetime.now().strftime('./bin/%m_%d_%Y_%H_%M_%S.bin')
+
+        self.output_file = file
+        self.f = open(file, 'wb')
 
     def _connect(self):
         # try to connect to the UDP socket

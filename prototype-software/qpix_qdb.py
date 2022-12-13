@@ -18,6 +18,7 @@ from PyQt5.QtWidgets import QApplication, QMainWindow, QAction
 from array import array
 import ROOT
 import numpy as np
+import datetime
 # for spawning other process to turn binary data into ROOT
 import subprocess 
 
@@ -668,7 +669,10 @@ class QPIX_GUI(QMainWindow):
         addr = REG.SAQ(SAQReg.SAQ_ENABLE)
         if self.saq_enable.isChecked():
             val = 1
-            self._start_hits = self.getSAQHits()
+            # restart the thread if we haven't started it yet
+            if not self.qpi.thread.isRunning():
+                print("restarting udp collection thread")
+                self.qpi.thread.start()
         else:
             val = 0
             self._stop_hits = self.getSAQHits()
@@ -785,18 +789,26 @@ class QPIX_GUI(QMainWindow):
         """
         self._mask = 0x0
 
-    def SaveData(self, output_file):
+    def SaveData(self, output_file=None):
         """
-        this function handles storing a recorded run at a destination output file.
+        NOTE: This function is called by default when the GUI closes
+
+        This function handles storing a recorded run at a destination output file.
 
         This should be the only controlling / call function that uses
         make_root.py to store output data and the metadata tree for SAQ on the
         Zybo.
         """
+        if output_file is None:
+            output_file = datetime.datetime.now().strftime('./%m_%d_%Y_%H_%M_%S.root')
+            print("saving default file", output_file)
+
         input_file = self.qpi.worker.output_file
+        if self.qpi.thread.isRunning():
+            self.close_udp.emit()
+
         found = os.path.isfile(input_file)
         if not found:
-            print("WARNING unable to find input binary data file!")
             return
         else:
             args = [input_file, output_file, self.version, self._start_hits, self._stop_hits]
@@ -874,6 +886,9 @@ class QPIX_GUI(QMainWindow):
         fileMenu.addAction(exitAct)
         fileMenu.addAction(saveAct)
 
+    def closeEvent(self, event):
+        print("closing the main gui")
+        self.SaveData()
 
     def SaveAs(self):
         """

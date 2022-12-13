@@ -289,7 +289,6 @@ class saqUDPworker(QObject):
             file = datetime.datetime.now().strftime('./bin/%m_%d_%Y_%H_%M_%S.bin')
 
         self.output_file = file
-        self.f = open(file, 'wb')
 
     def _connect(self):
         # try to connect to the UDP socket
@@ -316,6 +315,7 @@ class saqUDPworker(QObject):
         if not self._connect():
             self.finished.emit()
         else:
+            self.f = open(self.output_file, 'wb')
             self._stopped = False
             while not self._stopped:
                 while self._udpsocket.hasPendingDatagrams():
@@ -333,8 +333,8 @@ class saqUDPworker(QObject):
                     else:
                         print(f"writing packet length {size}..")
                         self.f.write(PACKET_HEADER+size.to_bytes(4, byteorder="little")+data)
-        self.f.close()
-        self.finished.emit()
+            self.f.close()
+            self.finished.emit()
 
 
 class DMA_REG(Enum):

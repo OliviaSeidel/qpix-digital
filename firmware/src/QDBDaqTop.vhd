@@ -455,7 +455,7 @@ begin
    TIMESTAMP_BITS => TIMESTAMP_BITS)
    port map(
       clk         => fclk,
-      rst         => rst,
+      rst         => axi_resetn(0),
       saqPortData => saqPortData,
       saqReadEn   => saq_fifo_ren,
       saqDataOut  => saq_fifo_data,

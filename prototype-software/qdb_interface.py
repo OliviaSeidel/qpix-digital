@@ -21,7 +21,7 @@ BUFFER_SIZE = 1024
 
 # UDP Info
 QP_UDP_IP   = '192.169.1.17'
-QP_UDP_PORT = 420
+QP_UDP_PORT = 1337
 EXIT_PACKET = bytes("ZaiJian", encoding="utf-8")
 PACKET_HEADER = bytes("HEADER", encoding="utf-8")
 DEFAULT_PACKET_SIZE = 5

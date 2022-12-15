@@ -146,7 +146,7 @@ begin  -- architecture SAQNode
   SAQFifo_U : entity work.fifo_generator_0
   port map(
     clk    => clk,
-    rst    => rst,
+    srst   => rst,
     din    => fifo_din,
     wr_en  => fifo_wr_en,
     rd_en  => fifo_rd_en,

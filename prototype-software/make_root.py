@@ -15,7 +15,7 @@ def main(input_file, output_file, version, start_hits, triggers):
     this script should be run from a selection within the GUI
     """
     if not os.path.isfile(input_file) or os.path.getsize(input_file) == 0:
-        print("empty or non-existent binary input file")
+        # print("empty or non-existent binary input file")
         return
 
     # create dest ROOT file

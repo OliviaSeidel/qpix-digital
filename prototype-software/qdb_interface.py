@@ -492,7 +492,7 @@ class qdb_interface(QObject):
         
         # set up SAQ register if version >= 8
         if self.version >= 8:
-            addr = REG.SAQ(SAQReg.SAQ_FIFO_HITS)
+            addr = REG.SAQ(SAQReg.SAQ_FIFO_LNGTH)
             self.regWrite(addr, DEFAULT_PACKET_SIZE) # make the length of a packet 5
 
         return checksum == verify

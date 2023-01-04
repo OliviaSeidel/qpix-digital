@@ -82,21 +82,21 @@ err_t recv_callback(void *arg, struct tcp_pcb *tpcb,
   if (tcp_sndbuf(tpcb) > p->len) {
 
     pbuf_copy_partial(p, recv_buf, p->tot_len, 0); 
-    xil_printf("len = %d\n\r",p->tot_len);
+    //xil_printf("len = %d\n\r",p->tot_len);
 
     /* Normal m_axi base addr TCP communication packets*/
     if (strcmp(recv_buf,"QRR") == 0) {
       addr = *(unsigned int *)(recv_buf + 4);
-      xil_printf("read addr %d\n\r",addr);
+      //xil_printf("read addr %d\n\r",addr);
       val = Xil_In32(XPAR_M_AXI_0_BASEADDR + 4*addr);
-      xil_printf("read val %d\n\r",val);
+      //xil_printf("read val %d\n\r",val);
       sprintf((char*)snd_buf, "OKK");
       memcpy(snd_buf+4,&val,4);
       err = tcp_write(tpcb, snd_buf, 8, 1);
     } else if (strcmp(recv_buf,"QRW") == 0) {
       addr = *(unsigned int *) (recv_buf + 4);
       val  = *(unsigned int *) (recv_buf + 8);
-      xil_printf("write addr %d val %d \n\r",addr, val);
+      //xil_printf("write addr %d val %d \n\r",addr, val);
       Xil_Out32(XPAR_M_AXI_0_BASEADDR + 4*addr, val);
       sprintf((char*)snd_buf, "OKK");
       err = tcp_write(tpcb, snd_buf, 4, 1);
@@ -104,16 +104,16 @@ err_t recv_callback(void *arg, struct tcp_pcb *tpcb,
       /* IO to the AXI DMA Register space */
     } else if (strcmp(recv_buf,"QDR") == 0) {
        addr = *(unsigned int *)(recv_buf + 4);
-       xil_printf("read addr %d\n\r",addr);
+       //xil_printf("read addr %d\n\r",addr);
        val = Xil_In32(XPAR_AXIDMA_0_BASEADDR + addr);
-       xil_printf("read val %d\n\r",val);
+       //xil_printf("read val %d\n\r",val);
        sprintf((char*)snd_buf, "OKK");
        memcpy(snd_buf+4,&val,4);
        err = tcp_write(tpcb, snd_buf, 8, 1);
     } else if (strcmp(recv_buf,"QDW") == 0) {
        addr = *(unsigned int *) (recv_buf + 4);
        val  = *(unsigned int *) (recv_buf + 8);
-       xil_printf("write addr %d val %d \n\r",addr, val);
+       //xil_printf("write addr %d val %d \n\r",addr, val);
        Xil_Out32(XPAR_AXIDMA_0_BASEADDR + addr, val);
        sprintf((char*)snd_buf, "OKK");
        err = tcp_write(tpcb, snd_buf, 4, 1);

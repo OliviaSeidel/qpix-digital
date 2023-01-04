@@ -222,6 +222,9 @@ int ZyboSetupIntrSystem(XScuGic *IntcInstancePtr, XAxiDma *InstancePtr,
 
 	Xil_ExceptionEnable();
 
+	/* we don't want no cache */
+	Xil_DCacheDisable();
+
 	return Status;
 }
 
@@ -282,22 +285,22 @@ static void RxIntrHandler(void *Callback)
 	 * If completion interrupt is asserted, then set RxDone flag
 	 */
 	if ((IrqStatus & XAXIDMA_IRQ_IOC_MASK)) {
-		dump_zybo_config(AxiDmaInst);
+		/* dump_zybo_config(AxiDmaInst); */
 		u32 Length = getLenReg(AxiDmaInst);
 		u32 Dest = getDestReg(AxiDmaInst);
 		DataBufPtr = (u32 *)Dest;
-		Xil_DCacheFlushRange((UINTPTR)Dest, Length);
+		// Xil_DCacheFlushRange((UINTPTR)Dest, Length);
 
 		/* read the buffers here, then re-enable */
-		int i;
-		for(i = 0; i < Length/4; ++i){
-			u32 reg = Dest + i;
-			u32 data = *(DataBufPtr + i);
-			memcpy(&data_buf[i], DataBufPtr+i, 4);
-//			xil_printf("REG: %08x, DATA: %08x\r\n", reg, data);
-		}
+		 int i;
+		 for(i = 0; i < Length/4; ++i){
+			 // u32 reg = Dest + i;
+			 // u32 data = *(DataBufPtr + i);
+			 memcpy(&data_buf[i], DataBufPtr+i, 4);
+			 // xil_printf("REG: %08x, DATA: %08x\r\n", reg, data);
+		 }
 
-//		xil_printf("sending UDP data! \r\n");
+
 		udp_packet_send(Length);
 
 		/*Re-arm for more data!*/

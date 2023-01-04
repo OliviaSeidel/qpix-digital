@@ -477,7 +477,7 @@ class qdb_interface(QObject):
         REG.SCRATCH buffer.
         """
         self.version = self.regRead(REG.SCRATCH)
-        print(f"Running version: 0x{version:08x}.. verifying..", end=" ")
+        print(f"Running version: 0x{self.version:08x}.. verifying..", end=" ")
 
         # update and check
         checksum = 0x0a0a_a0a0
@@ -488,10 +488,10 @@ class qdb_interface(QObject):
             print(f"0x{checksum:08x} != 0x{verify:08x}")
         else:
             print("verification passed!")
-            self.regWrite(REG.SCRATCH, version)
+            self.regWrite(REG.SCRATCH, self.version)
         
         # set up SAQ register if version >= 8
-        if version >= 8:
+        if self.version >= 8:
             addr = REG.SAQ(SAQReg.SAQ_FIFO_HITS)
             self.regWrite(addr, DEFAULT_PACKET_SIZE) # make the length of a packet 5
 

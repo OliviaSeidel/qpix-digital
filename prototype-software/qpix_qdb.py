@@ -275,9 +275,9 @@ class QPIX_GUI(QMainWindow):
         hMaskLayout.addWidget(masklsBox)
 
         saqMaskBox = QSpinBox()
-        # maximum of 15 bits
-        saqMaskBox.setRange(0, 0x7fff)
-        saqMaskBox.setValue(1)
+        # maximum of 16 bits
+        saqMaskBox.setRange(0, 0xffff)
+        saqMaskBox.setValue(0xffff)
         hMaskLayout.addWidget(saqMaskBox)
         self._saqMaskBox = saqMaskBox
 
@@ -626,13 +626,19 @@ class QPIX_GUI(QMainWindow):
         issue register write to SAQ mask value
         """
         mask = self._saqMaskBox.value()
-        assert mask < 1<<15, "total number of bits is 15"
+        assert mask < 1<<16, "total number of bits is 16"
         self._saqMask = mask
         self._saqMaskBox.setValue(self._saqMask)
 
-        # addr = REG.SAQ(SAQReg.MASK)
-        # print(f"setting mask value: {mask}")
-        # wrote = self.qpi.regWrite(addr, mask)
+        addr = REG.SAQ(SAQReg.MASK)
+        self.qpi.regWrite(addr, mask)
+
+        # verify mask
+        readMask = self.qpi.regRead(addr)
+        if readMask != mask:
+            print(f"warning did not write correct mask: {readMask:04x} != 0x{mask:04x}")
+        else:
+            print(f"mask correctly value set to: {mask:04x}")
 
     def setSAQLength(self):
         """

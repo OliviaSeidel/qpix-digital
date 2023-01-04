@@ -59,9 +59,16 @@ architecture Behavioral of saq_qdb_sim_TB is
    constant Asic_CLK_PERIOD_NOMINAL_C      : time := 83333.0 ps; -- 12 MHz
    constant CLK_PERIOD_SPREAD_FRACTIONAL_C : real := 0.05;
    constant GATE_DELAY_C : time := 1 ns;
+   constant saqPacketLength : slv(31 downto 0) := x"00000005"; 
 
    constant TIMESTAMP_BITS : natural := 32;
    constant N_SAQ_PORTS : natural := 8;
+
+   -- connect to PS axi-stream data fifo
+   signal S_AXI_0_tlast   : STD_LOGIC;
+   signal S_AXI_0_tdata  : STD_LOGIC_VECTOR (31 downto 0);
+   signal S_AXI_0_tready : STD_LOGIC;
+   signal S_AXI_0_tvalid : STD_LOGIC;
 
    -- signals for DUT
    signal clk12 : std_logic := '0';
@@ -90,10 +97,19 @@ begin
       port map(
         clk            => clk12,
         rst            => rst,
+        -- connecting to the AXI-Stream data FIFO
+        S_AXI_0_tdata   => S_AXI_0_tdata,
+        S_AXI_0_tready  => S_AXI_0_tready,
+        S_AXI_0_tlast   => S_AXI_0_tlast,
+        S_AXI_0_tvalid  => S_AXI_0_tvalid,
+        
         -- axi protocol information
         saqPortData => saqPortData,
         saqReadEn   => saqReadEn,
         saqDataOut  => saqDataOut,
+        saqPacketLength => saqPacketLength,
+        saqForce => '0',
+        saqEnable => '1',
         valid       => valid,
         empty       => empty,
         full        => full,
@@ -123,8 +139,10 @@ begin
       --------------------------
       -- Stimulus begins here --
       --------------------------
-      wait for 2.0 ns;
+      --wait for 2.0 ns;
       
+      -- data stream fifo always ready
+      S_AXI_0_tready <= '1';
       
       -- 0-1-0 reset pattern required for FIFO generated in Xilinx IP
         saqReadEn <= '0';
@@ -132,13 +150,13 @@ begin
         saqPortData <= (others => '0');
         saqMask     <= (others => '1');
         
-      wait for 500 ns;   
+      wait for 50 ns;   
         rst <= '1';
 
-      wait for 500 ns;
+      wait for 50 ns;
         rst <= '0';
         
-      wait for 500 ns;   
+      wait for 50 ns;   
         saqPortData <= (others => '1');        
       
       -- get a bunch of writes

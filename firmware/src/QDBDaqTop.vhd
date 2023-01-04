@@ -354,7 +354,7 @@ begin
    generic map (
       X_NUM_G        => X_NUM_G,
       Y_NUM_G        => Y_NUM_G,
-      Version        => x"0000_000d",
+      Version        => x"0000_000e",
       N_SAQ_PORTS    => N_SAQ_PORTS,
       TIMESTAMP_BITS => TIMESTAMP_BITS
    )
@@ -401,7 +401,6 @@ begin
       saqEnable       => saqEnable,
       saqForce        => saqForce,
       saq_fifo_hits   => saq_fifo_hits,
-      saq_fifo_valid  => saq_fifo_valid,
       saq_fifo_full   => saq_fifo_full,
       saq_fifo_empty  => saq_fifo_empty,
       saq_fifo_ren    => saq_fifo_ren,
@@ -455,7 +454,7 @@ begin
    TIMESTAMP_BITS => TIMESTAMP_BITS)
    port map(
       clk         => fclk,
-      rst         => axi_resetn(0),
+      rst         => not(axi_resetn(0)),
       saqPortData => saqPortData,
       saqReadEn   => saq_fifo_ren,
       saqDataOut  => saq_fifo_data,
@@ -503,9 +502,9 @@ begin
      if rising_edge(fclk) then
      
        -- LED Flashing conditions
-        cr5 := s_daqRx = '1';
-        cg5 := evtSize /= x"0000_0000";
-        cb5 := s_daqTx = '1';
+        cr5 := saqForce = '1';
+        cg5 := saqEnable = '1';
+        cb5 := S_AXI_0_tready = '1';
               
         cr6 := saq_fifo_full = '1';
         cg6 := saq_fifo_empty = '1';

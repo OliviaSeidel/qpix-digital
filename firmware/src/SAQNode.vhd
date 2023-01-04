@@ -6,7 +6,7 @@
 -- Author     : Kevin Keefe <kevinpk@hawaii.edu>
 -- Company    :
 -- Created    : 2022-09-06
--- Last update: 2022-09-19
+-- Last update: 2023-01-04
 -- Platform   : Windows 11
 -- Standard   : VHDL08
 -------------------------------------------------------------------------------
@@ -146,7 +146,7 @@ begin  -- architecture SAQNode
   SAQFifo_U : entity work.fifo_generator_0
   port map(
     clk    => clk,
-    srst   => rst,
+    rst   => '0',
     din    => fifo_din,
     wr_en  => fifo_wr_en,
     rd_en  => fifo_rd_en,

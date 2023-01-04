@@ -34,7 +34,7 @@ use work.UtilityPkg.all;
 
 entity SaqDataCtrl is
 generic (
-  N_SAQ_PORTS    : natural := 8;
+  N_SAQ_PORTS    : natural := 16;
   TIMESTAMP_BITS : natural := 32);      -- number of input SAQ channels to zybo
 port (
   clk             : in  sl;

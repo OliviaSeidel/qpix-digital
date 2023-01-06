@@ -284,6 +284,7 @@ class QPIX_GUI(QMainWindow):
         btn_sMask = QPushButton()
         btn_sMask.setText('Update SAQ Mask')
         btn_sMask.clicked.connect(self.setSAQMask)
+        btn_sMask.setEnabled(False)
         hMaskLayout.addWidget(btn_sMask)
         layout.addLayout(hMaskLayout)
 
@@ -669,8 +670,17 @@ class QPIX_GUI(QMainWindow):
 
     def enableSAQ(self):
         """
-        read / write the single bit register at SaqEnable to turn on Axi Fifo streaming.
-        then update the saqMask to begin allowing triggers from saq pins
+        Toggle function to turn ON or OFF data collection.
+
+        saqEnable value is read from a QCheckBox of the main GUI.
+        This function should enable the saqMask and update the packetLength
+        registers when the box is CHECKED or ON.
+
+        This function similarly should turn OFF or set a value of 0 to the SAQMask.
+
+        Any non-zero SaqMask value will record triggers regardless of the value
+        of saqEnable which can cause continuous UDP data streams in firmware
+        version 0xe.
         """
         addr = REG.SAQ(SAQReg.SAQ_ENABLE)
         if self.saq_enable.isChecked():
@@ -679,16 +689,19 @@ class QPIX_GUI(QMainWindow):
             if not self.qpi.thread.isRunning():
                 print("restarting udp collection thread")
                 self.qpi.thread.start()
+
+            # update the packet length at the beginning of a run
+            self.setSAQLength()
         else:
             val = 0
             self._stop_hits = self.getSAQHits()
         self.qpi.regWrite(addr, val)
 
         # enable the SAQ, update the mask, and put that value in the spin box
-        if val == 1:
-            addr = REG.SAQ(SAQReg.MASK)
-            wrote = self.qpi.regWrite(addr, self._saqMask)
-            self._saqMaskBox.setValue(self._saqMask)
+        addr = REG.SAQ(SAQReg.MASK)
+        sndMask = self._saqMask if val == 1 else 0
+        self.qpi.regWrite(addr, sndMask)
+        self._saqMaskBox.setValue(sndMask)
 
     def flushSAQ(self):
         """

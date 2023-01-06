@@ -35,6 +35,7 @@ class QPIX_GUI(QMainWindow):
         # IO interfaces
         self.qpi = qdb_interface()
         self.close_udp.connect(self.qpi.finish) # closes udp worker thread
+        self.qpi.worker.new_data.connect(self.new_udp_data)
         self._tf = ROOT.TFile("./test.root", "RECREATE")
         self._tt = ROOT.TTree("qdbData", "data_tree")
         self._saqMask = 0
@@ -81,6 +82,9 @@ class QPIX_GUI(QMainWindow):
 
         # FIXME: may go elsewhere...?
         self.updateChannelMaskOnZybo() 
+
+    def new_udp_data(self):
+        print("new data arrived")
         
     def _makeChannelsLayout(self):
         self._channelsPage = QWidget()

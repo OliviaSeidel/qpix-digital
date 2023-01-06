@@ -32,25 +32,23 @@ class dialogWindow(QDialog):
 
     acceptedMask = pyqtSignal(int)
 
-    def __init__(self):
+    def __init__(self, mask):
         super().__init__()
 
         self.setWindowTitle("SAQ Mask")
-        size = 16
         QBtn = QDialogButtonBox.Ok | QDialogButtonBox.Cancel
 
         self.buttonBox = QDialogButtonBox(QBtn)
         self.buttonBox.accepted.connect(self._makeMask)
         self.buttonBox.rejected.connect(self.reject)
 
-        self.mask = 0
         self.layout = QVBoxLayout(self)
 
         self.layout.addStretch()
         self.checkBoxes = []
-        for i in range(size):
+        for i in range(16): # assume 16 channels in SAQ
             p = QCheckBox(f"Channel - {i+1}")
-            p.setChecked(True)
+            p.setChecked(bool((1<<i) & mask))
             self.checkBoxes.append(p)
             self.layout.addWidget(p)
 
@@ -79,7 +77,7 @@ class QPIX_GUI(QMainWindow):
         self.close_udp.connect(self.qpi.finish) # closes udp worker thread
         self._tf = ROOT.TFile("./test.root", "RECREATE")
         self._tt = ROOT.TTree("qdbData", "data_tree")
-        self._saqMask = 0
+        self._saqMask = 0xffff # default everything is on
 
         # SAQ meta data information
         self._start_hits = 0
@@ -933,7 +931,7 @@ class QPIX_GUI(QMainWindow):
         Function opens dialogWindow class to prompt user for a new timestamp
         trigger mask.
         """
-        self.dialog = dialogWindow()
+        self.dialog = dialogWindow(self._saqMask)
         self.dialog.acceptedMask.connect(self.accept)
         self.dialog.rejected.connect(self.reject)
         self.dialog.exec()

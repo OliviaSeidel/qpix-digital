@@ -92,6 +92,16 @@ class QPIX_GUI(QMainWindow):
         label = QLabel()
         label.setText("Channels page")
         layout.addWidget(label)
+        
+        #Add graphs
+        graph = pg.GraphicsLayoutWidget(show = True, title = "Channels 1 - 16")
+        graph.setBackground('w')
+        for i in range(16):
+            ch = graph.addPlot(title = "Channel " + str(i+1))
+            if (i+1)%4 == 0:
+                graph.nextRow()
+        layout.addWidget(graph)
+
         self._channelsPage.setLayout(layout)
         return self._channelsPage
         

@@ -274,7 +274,8 @@ class saqUDPworker(QObject):
     all data into an output file.
     """
     finished = pyqtSignal()
-
+    new_data = pyqtSignal(object)
+    
     def __init__(self):
         super().__init__()
 
@@ -283,14 +284,17 @@ class saqUDPworker(QObject):
         self._stopped = True
 
         # don't delete files that have data in them and are unsaved
+        # FIXME: doesn't this mean that the first time you run the code
+        # data is saved in SAQ_TMP_FILE instead of the timestamped version?
+        # Why do we have the SAQ_TMP_FILE at all anymore?
         if not os.path.isfile(SAQ_TMP_FILE) or os.path.getsize(SAQ_TMP_FILE) == 0:
             file = SAQ_TMP_FILE
         else:
             file = datetime.datetime.now().strftime('./bin/%m_%d_%Y_%H_%M_%S.bin')
 
         self.output_file = file
-
-    def _connect(self):
+        
+    def _udp_connect(self):
         # try to connect to the UDP socket
         print("udp connecting..", end="")
         connected = False
@@ -308,11 +312,47 @@ class saqUDPworker(QObject):
 
         return connected
 
+    def on_readyRead(self):
+        while self._udpsocket.hasPendingDatagrams():
+            datagram = QByteArray()
+            datagram.resize(self._udpsocket.pendingDatagramSize())
+            datagram, host, port = self._udpsocket.readDatagram(self._udpsocket.pendingDatagramSize())
+            ##print("message from:", host.toString())
+            ##print("message port:", port)
+            ##print("message:", datagram.decode())
+            ##print(datagram)
+            ##print(type(datagram))
+            ##print(datagram[0])
+            ##print()
+            #print("on_readyRead")
+            #print(qd)
+            if datagram == EXIT_PACKET:
+                self.f.close()
+                self.finished.emit()
+            else:
+                #print("emitting new_data signal")
+                self.new_data.emit(datagram)
+                size = len(datagram)
+                nresets = int((size-2)/8)
+                print(f"writing packet length {size} = {nresets} resets")
+                self.f = open(self.output_file, 'wb')
+                self.f.write(PACKET_HEADER+size.to_bytes(4, byteorder="little")+datagram)
+                self.f.close()
+
     def run(self):
+        if not self._udp_connect():
+            self.finished.emit()
+        else:
+            self._udpsocket.readyRead.connect(self.on_readyRead)
+        
+    def run2(self):
         """
+        DEFUNCT:  see run() instead
+        
         try to connect to a socket, if successful wait listening forever.
         """
-        if not self._connect():
+
+        if not self._udp_connect():
             self.finished.emit()
         else:
             self.f = open(self.output_file, 'wb')
@@ -336,7 +376,7 @@ class saqUDPworker(QObject):
             self.f.close()
             self.finished.emit()
 
-
+            
 class DMA_REG(Enum):
     """
     Enum class to specific DMA registers of interest to be used during

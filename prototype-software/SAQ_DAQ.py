@@ -4,6 +4,7 @@ from qdb_interface import (AsicREG, AsicCMD, AsicEnable, AsicMask,
 import os
 import sys
 import time
+import struct
 
 # PyQt GUI things
 from PyQt5 import QtCore
@@ -25,6 +26,7 @@ import datetime
 # for spawning other process to turn binary data into ROOT
 import subprocess 
 
+N_SAQ_CHANNELS = 16
 
 class QPIX_GUI(QMainWindow):
     close_udp = pyqtSignal()
@@ -35,7 +37,7 @@ class QPIX_GUI(QMainWindow):
         # IO interfaces
         self.qpi = qdb_interface()
         self.close_udp.connect(self.qpi.finish) # closes udp worker thread
-        self.qpi.worker.new_data.connect(self.new_udp_data)
+        self.qpi.worker.new_data.connect(self.on_new_data)
         self._tf = ROOT.TFile("./test.root", "RECREATE")
         self._tt = ROOT.TTree("qdbData", "data_tree")
         self._saqMask = 0
@@ -57,6 +59,10 @@ class QPIX_GUI(QMainWindow):
         for data, typ in zip(self._data.items(), types):
             self._tt.Branch(data[0], data[1], typ)
 
+        # Data for on-line plots
+        self._plotUpdateCadence = 1000 # milliseconds
+        self._init_online_data()
+            
         # window setup
         self.setWindowTitle('SAQ DAQ')
 
@@ -66,6 +72,8 @@ class QPIX_GUI(QMainWindow):
         #self._clock = QTimer()
         #self._clock.timeout.connect(self.trigger)
         #self._lastTrig = -1
+        self._graphTimer = QTimer()
+        self._graphTimer.timeout.connect(self._update_online_graphs)
 
         # initialize the sub menus
         self._make_menuBar()
@@ -83,9 +91,54 @@ class QPIX_GUI(QMainWindow):
         # FIXME: may go elsewhere...?
         self.updateChannelMaskOnZybo() 
 
-    def new_udp_data(self):
-        print("new data arrived")
+    def _init_online_data(self):
+        self._online_data = {}
+        self._online_data['averageResetRates'] = {}
+        self._clear_online_data()
         
+    def _clear_online_data(self):
+        for ii in range(N_SAQ_CHANNELS):
+            chan = ii+1
+            self._online_data['averageResetRates'][chan] = [0]
+       
+    def parse_data(self, data):
+        nwords = int(len(data)/8)
+
+        ii = 0
+        for __ in range(nwords):
+            # timestamp
+            tt = struct.unpack("<I", data[ii:ii+4])[0]
+            ii += 4
+            # channel hit list (1-16)
+            cc = struct.unpack("<H", data[ii:ii+2])[0]
+            ii += 2
+            # metadata
+            mm = struct.unpack("<H", data[ii:ii+2])[0]
+            ii += 2
+            print(f"    {tt}, {cc}, {mm}")
+            
+            # update online data stats
+            chans = self.chans_with_resets(cc)
+            print(f"chans = {chans}")
+            for chan in chans:
+                print(self._online_data['averageResetRates'])
+                self._online_data['averageResetRates'][chan][-1] += 1/self._plotUpdateCadence
+
+        pid = struct.unpack("<H", data[-2:])[0]
+        print(f"    {pid}")
+
+    def chans_with_resets(self, mask):
+        # input: mask
+        # output: list of channels in that mask
+        # e.g. chans_with_resets(19) returns [1,2,16]
+        binstr = bin(mask)[2:]      # e.g. 10011 for mask=19
+        binstr_reverse = binstr[::-1]   # e.g. 11001
+        chans = [2**x for x in range(len(binstr_reverse)) if binstr_reverse[x] == '1']  # e.g. [1,2,16]
+        return chans
+        
+    def on_new_data(self, data):
+        self.parse_data(data)
+
     def _makeChannelsLayout(self):
         self._channelsPage = QWidget()
         layout = QHBoxLayout()
@@ -93,14 +146,14 @@ class QPIX_GUI(QMainWindow):
         label.setText("Channels page")
         layout.addWidget(label)
         
-        #Add graphs
-        graph = pg.GraphicsLayoutWidget(show = True, title = "Channels 1 - 16")
-        graph.setBackground('w')
-        for i in range(16):
-            ch = graph.addPlot(title = "Channel " + str(i+1))
-            if (i+1)%4 == 0:
-                graph.nextRow()
-        layout.addWidget(graph)
+        ##Add graphs
+        #graph = pg.GraphicsLayoutWidget(show = True, title = "Channels 1 - 16")
+        #graph.setBackground('w')
+        #for i in range(16):
+        #    ch = graph.addPlot(title = "Channel " + str(i+1))
+        #    if (i+1)%4 == 0:
+        #        graph.nextRow()
+        #layout.addWidget(graph)
 
         self._channelsPage.setLayout(layout)
         return self._channelsPage
@@ -177,14 +230,14 @@ class QPIX_GUI(QMainWindow):
         graph.setTitle("Average reset rate per channel")
         graph.setLabel("left", "y-axis label")
         graph.setLabel("bottom", "x-axis label")
-        pen1 = pg.mkPen(color=(255,0,0), width=3)
-        pen2 = pg.mkPen(color=(0,0,255), width=3)
-        line1 = graph.plot([1,2,3],[1,2,3], pen=pen1, name='Ch. 1')
-        line2 = graph.plot([1,2,3],[1,4,9], pen=pen2, name='Ch. 2')
+        width = 3
+        plotLines = []
+        for ichan in range(N_SAQ_CHANNELS):
+            color = (0,0,ichan*256/N_SAQ_CHANNELS)
+            plotLines.append(graph.plot([], pen=pg.mkPen(color=color, width=width), name=f'Ch. {ichan+1}'))
         plotLayout.addWidget(graph)
 
         return self._generalPage
-
 
     def startRun(self):
         print("start run clicked")
@@ -192,6 +245,7 @@ class QPIX_GUI(QMainWindow):
 
     def stopRun(self):
         print("stop run clicked")
+        self.disableSAQ()
 
     def clearData(self):
         print("clear data clicked")
@@ -210,6 +264,11 @@ class QPIX_GUI(QMainWindow):
     ############################
     ## SAQ specific Commands  ##
     ############################
+    def disableSAQ(self):
+        print("disableSAQ")
+        # stop update timer
+        self._graphTimer.stop()
+        
     def enableSAQ(self):
         """
         read / write the single bit register at SaqEnable to turn on Axi Fifo streaming.
@@ -222,6 +281,21 @@ class QPIX_GUI(QMainWindow):
             self.qpi.thread.start()
         self.qpi.regWrite(addr, 1)
 
+        # start the graph update timer
+        self._graphTimer.start(self._plotUpdateCadence) # milliseconds
+        # reset the statistics (?)
+        self._graph_reset()
+
+    def _update_online_graphs(self):
+        pass
+    #    for ii in range(N_SAQ_CHANNELS):
+    #        chan = ii+1
+    #        plotLines[ii].setData([])
+        
+    def _graph_reset(self):
+        self._clear_online_data()
+        self._update_online_graphs()
+        
     # FIXME: move to other location in code
     def getChannelMaskFromGUI(self):
         self._saqMask = 0

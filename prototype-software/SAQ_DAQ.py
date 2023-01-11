@@ -327,6 +327,11 @@ class QPIX_GUI(QMainWindow):
                                        )
         # autoscale
         self.graph.autoRange()
+
+        #Update LCD display
+        for ii in range(N_SAQ_CHANNELS):
+            chan = ii + 1
+            self.lcdChannels[ii].display(self._online_data['averageResetRates'][chan][-1])
             
         # prep for next plot point
         self._online_data['averageResetRates_time'].append(self._online_data['averageResetRates_time'][-1] +

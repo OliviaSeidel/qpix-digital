@@ -34,6 +34,7 @@ entity SAQAxiFifo is
 
   port (
     clk : in sl;
+    rst : in sl;
     -- Fifo Generator Ports
     fifo_dout    : in  slv(63 downto 0);
     fifo_wr_en   : in  sl;
@@ -118,7 +119,10 @@ begin  -- architecture Behavioral
             sNPackets <= nPackets;
 
             -- an incoming force pulse should send a last when the fifo is empty
-            if saqForce = '1' then
+            if rst = '1' then
+                s_state_r <= IDLE;
+                nPackets      := (others => '0');
+            elsif saqForce = '1' then
                 forceLast := '1';
             end if;
 

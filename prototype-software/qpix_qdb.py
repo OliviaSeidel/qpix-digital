@@ -282,7 +282,7 @@ class QPIX_GUI(QMainWindow):
         btn_sMask = QPushButton()
         btn_sMask.setText('Update SAQ Mask')
         btn_sMask.clicked.connect(self.setSAQMask)
-        btn_sMask.setEnabled(False)
+        # btn_sMask.setEnabled(False)
         hMaskLayout.addWidget(btn_sMask)
         layout.addLayout(hMaskLayout)
 
@@ -682,14 +682,18 @@ class QPIX_GUI(QMainWindow):
         """
         addr = REG.SAQ(SAQReg.SAQ_ENABLE)
         if self.saq_enable.isChecked():
+            # reset all data at the beginning of a run
+            self.SaqRst()
+
             val = 1
+
+            # update the packet length at the beginning of a run
+            self.setSAQLength()
+
             # restart the thread if we haven't started it yet
             if not self.qpi.thread.isRunning():
                 print("restarting udp collection thread")
                 self.qpi.thread.start()
-
-            # update the packet length at the beginning of a run
-            self.setSAQLength()
         else:
             val = 0
             self._stop_hits = self.getSAQHits()
@@ -700,6 +704,19 @@ class QPIX_GUI(QMainWindow):
         sndMask = self._saqMask if val == 1 else 0
         self.qpi.regWrite(addr, sndMask)
         self._saqMaskBox.setValue(sndMask)
+        if val == 1:
+            print("Saq Enabled")
+
+    def SaqRst(self):
+        """
+        Saq Reset is called to reset the FIFO and AXI-Stream FIFOs
+        which store reset data on the Zynq FPGA.
+        This reset will DELETE all currently stored reset data on the Zybo board.
+        """
+        print("reseting SAQ data")
+        addr = REG.SAQ(SAQReg.SAQ_RST)
+        # writing value doesn't matter for this register
+        self.qpi.regWrite(addr, 0)
 
     def flushSAQ(self):
         """

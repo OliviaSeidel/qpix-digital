@@ -95,6 +95,7 @@ class SAQReg(Enum):
     SAQ_FIFO_LNGTH = 0x55
     SAQ_FIFO_HITS = 0x56
     SAQ_FORCE = 0x57
+    SAQ_RST = 0x58
 
 
 def MemAddr(evt, pos):

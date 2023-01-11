@@ -130,7 +130,8 @@ begin  -- architecture SAQNode
       saqMask         => saqMask
     );
 
-  fifo_wr_en <= saqCtrlOutValid;
+  -- write on rising edge triggers when there's room
+  fifo_wr_en <= saqCtrlOutValid and not fifo_full;
   fifo_din   <= empty_bits & saqCtrlDataOut;
 
   -- mux the read enable flag based on register transaction
@@ -146,7 +147,7 @@ begin  -- architecture SAQNode
   SAQFifo_U : entity work.fifo_generator_0
   port map(
     clk    => clk,
-    rst   => '0',
+    rst    => rst,
     din    => fifo_din,
     wr_en  => fifo_wr_en,
     rd_en  => fifo_rd_en,
@@ -166,6 +167,7 @@ begin  -- architecture SAQNode
   AXIS_SAQFifo_U : entity work.SAQAxiFifo
   port map(
     clk => clk,
+    rst => rst,
 
     -- Fifo Connections
     fifo_dout  => fifo_dout,

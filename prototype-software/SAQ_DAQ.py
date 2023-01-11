@@ -67,6 +67,7 @@ class QPIX_GUI(QMainWindow):
         self.setWindowTitle('SAQ DAQ')
 
         self.cbChannels = []
+        self.lcdChannels = []
         
         # passive triggering
         #self._clock = QTimer()
@@ -176,16 +177,24 @@ class QPIX_GUI(QMainWindow):
         
         layout = QHBoxLayout()
 
-        ctrlLayout = QHBoxLayout()
+        ctrlLayout = QVBoxLayout()
         plotLayout = QHBoxLayout()
+        
         layout.addLayout(ctrlLayout)
         layout.addLayout(plotLayout)
-
+        
+        topLayout = QHBoxLayout()
+        bottomLayout = QHBoxLayout()
+        ctrlLayout.addLayout(topLayout)
+        ctrlLayout.addLayout(bottomLayout)
+        
         cbLayout = QGridLayout() # channel checkboxes
         btnLayout = QVBoxLayout() # start/stop buttons
-        ctrlLayout.addLayout(cbLayout)
-        ctrlLayout.addLayout(btnLayout)
-
+        chLayout   = QGridLayout()
+        topLayout.addLayout(cbLayout)
+        topLayout.addLayout(btnLayout)
+        bottomLayout.addLayout(chLayout)
+        
         self._generalPage.setLayout(layout)
 
         # checkboxes
@@ -200,8 +209,9 @@ class QPIX_GUI(QMainWindow):
 
                 self.cbChannels.append(cb)
                 cbLayout.addWidget(cb, row, col, QtCore.Qt.AlignTop)
-        vspacer = QSpacerItem(40, 20, QSizePolicy.Minimum, QSizePolicy.Expanding)
-        cbLayout.addItem(vspacer, 8, 0, QtCore.Qt.AlignTop)
+
+#        vspacer = QSpacerItem(40, 20, QSizePolicy.Minimum, QSizePolicy.Expanding)
+#        cbLayout.addItem(vspacer, 8, 0, QtCore.Qt.AlignTop)
         
         # start/stop buttons
         btnStart = QPushButton("Start")
@@ -221,6 +231,22 @@ class QPIX_GUI(QMainWindow):
         btnLayout.addWidget(btnSave)
 
         btnLayout.addStretch() # vfill at the bottom
+
+
+        #channel reset displays
+        ncols = 4
+        nrows = 8
+        for col in range(ncols):
+            for row in range(nrows):
+                if (col+1)%2 == 0:
+                    cb = QLCDNumber()
+                    self.lcdChannels.append(cb)
+                    chLayout.addWidget(cb, row, col, QtCore.Qt.AlignBottom)
+                else:
+                    chan = (int((col/2)*nrows))+row + 1
+                    label = QLabel("Ch." + f"{chan}")
+                    chLayout.addWidget(label, row, col, QtCore.Qt.AlignBottom)
+
         
         graph = pg.PlotWidget()
         graph.addLegend()

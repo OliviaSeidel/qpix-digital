@@ -97,6 +97,7 @@ class QPIX_GUI(QMainWindow):
         self._clear_online_data()
         
     def _clear_online_data(self):
+        print("_clear_online_data")
         self._online_data['averageResetRates_time'] = [self._plotUpdateCadence*0.001]
         for ii in range(N_SAQ_CHANNELS):
             chan = ii+1
@@ -120,7 +121,6 @@ class QPIX_GUI(QMainWindow):
             
             # update online data stats
             chans = self.chans_with_resets(cc)
-            print(f"chans = {chans}")
             for chan in chans:
                 self._online_data['averageResetRates'][chan][-1] += 1/(self._plotUpdateCadence*0.001)
 
@@ -272,7 +272,9 @@ class QPIX_GUI(QMainWindow):
     def disableSAQ(self):
         print("disableSAQ")
         # stop update timer
-        self._graphTimer.stop()
+        #self._graphTimer.stop()
+        self._graphTimer.timeout.disconnect()
+        
         
     def enableSAQ(self):
         """
@@ -288,12 +290,13 @@ class QPIX_GUI(QMainWindow):
 
         # start the graph update timer
         self._graphTimer.start(self._plotUpdateCadence) # milliseconds
+        #self._graphTimer.timeout.connect(self._update_online_graphs)
         # reset the statistics (?)
         self._graph_reset()
 
     def _update_online_graphs(self):
-        
         # update plot data
+        print("_update_online_graphs()")
         for ii in range(N_SAQ_CHANNELS):
             chan = ii+1
             self.plotLines[ii].setData(self._online_data['averageResetRates_time'],
@@ -310,6 +313,7 @@ class QPIX_GUI(QMainWindow):
             self._online_data['averageResetRates'][chan].append(0)
         
     def _graph_reset(self):
+        print("_graph_reset")
         self._clear_online_data()
         self._update_online_graphs()
         

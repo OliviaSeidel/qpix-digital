@@ -295,11 +295,6 @@ class QPIX_GUI(QMainWindow):
     ############################
     ## SAQ specific Commands  ##
     ############################
-    def disableSAQ(self):
-        print("disableSAQ")
-        # stop update timer
-        #self._graphTimer.stop()
-        self._graphTimer.timeout.disconnect()
         
         
     def enableSAQ(self):
@@ -330,7 +325,7 @@ class QPIX_GUI(QMainWindow):
                                        )
         # autoscale
         self.graph.autoRange()
-            
+
         # prep for next plot point
         self._online_data['averageResetRates_time'].append(self._online_data['averageResetRates_time'][-1] +
                                                            self._plotUpdateCadence*0.001)
@@ -367,6 +362,10 @@ class QPIX_GUI(QMainWindow):
         read / write the single bit register at SaqEnable to turn off Axi Fifo streaming.
         then update the saqMask to disable triggers from saq pins
         """
+        print("disableSAQ .....")
+        # stop update timer
+        self._graphTimer.stop()
+        
         addr = REG.SAQ(SAQReg.SAQ_ENABLE)
         self.qpi.regWrite(addr, 0)
         self._stop_hits = self.getSAQHits()

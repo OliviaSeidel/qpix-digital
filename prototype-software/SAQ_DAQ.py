@@ -98,6 +98,7 @@ class QPIX_GUI(QMainWindow):
         self._clear_online_data()
         
     def _clear_online_data(self):
+        self._online_data['averageResetRates_time'] = [self._plotUpdateCadence*0.001]
         for ii in range(N_SAQ_CHANNELS):
             chan = ii+1
             self._online_data['averageResetRates'][chan] = [0]
@@ -122,8 +123,7 @@ class QPIX_GUI(QMainWindow):
             chans = self.chans_with_resets(cc)
             print(f"chans = {chans}")
             for chan in chans:
-                print(self._online_data['averageResetRates'])
-                self._online_data['averageResetRates'][chan][-1] += 1/self._plotUpdateCadence
+                self._online_data['averageResetRates'][chan][-1] += 1/(self._plotUpdateCadence*0.001)
 
         pid = struct.unpack("<H", data[-2:])[0]
         print(f"    {pid}")
@@ -248,20 +248,25 @@ class QPIX_GUI(QMainWindow):
                     chLayout.addWidget(label, row, col, QtCore.Qt.AlignBottom)
 
         
-        graph = pg.PlotWidget()
-        graph.addLegend()
+        self.graph = pg.PlotWidget()
+        self.graph.addLegend()
         #color = self.palette().color(QPalette.Window)
         #graph.setBackground(color)
-        graph.setBackground('w')
-        graph.setTitle("Average reset rate per channel")
-        graph.setLabel("left", "y-axis label")
-        graph.setLabel("bottom", "x-axis label")
+        self.graph.setBackground('w')
+        self.graph.setTitle("Average reset rate per channel")
+        self.graph.setLabel("left", "y-axis label")
+        self.graph.setLabel("bottom", "x-axis label")
         width = 3
-        plotLines = []
+        self.plotLines = []
         for ichan in range(N_SAQ_CHANNELS):
             color = (0,0,ichan*256/N_SAQ_CHANNELS)
-            plotLines.append(graph.plot([], pen=pg.mkPen(color=color, width=width), name=f'Ch. {ichan+1}'))
-        plotLayout.addWidget(graph)
+            #self.plotLines.append(self.graph.plot([], pen=pg.mkPen(color=color, width=width), name=f'Ch. {ichan+1}'))
+            self.plotLines.append(self.graph.plot([], pen=None, name=f'Ch. {ichan+1}',
+                                                  symbol='o', symbolPen=pg.mkPen(color=color),
+                                                  symbolBrush=pg.mkBrush(color=color)
+                                                  ))
+                                             
+        plotLayout.addWidget(self.graph)
 
         return self._generalPage
 
@@ -313,10 +318,22 @@ class QPIX_GUI(QMainWindow):
         self._graph_reset()
 
     def _update_online_graphs(self):
-        pass
-    #    for ii in range(N_SAQ_CHANNELS):
-    #        chan = ii+1
-    #        plotLines[ii].setData([])
+        
+        # update plot data
+        for ii in range(N_SAQ_CHANNELS):
+            chan = ii+1
+            self.plotLines[ii].setData(self._online_data['averageResetRates_time'],
+                                       self._online_data['averageResetRates'][chan],
+                                       )
+        # autoscale
+        self.graph.autoRange()
+            
+        # prep for next plot point
+        self._online_data['averageResetRates_time'].append(self._online_data['averageResetRates_time'][-1] +
+                                                           self._plotUpdateCadence*0.001)
+        for ii in range(N_SAQ_CHANNELS):
+            chan = ii+1
+            self._online_data['averageResetRates'][chan].append(0)
         
     def _graph_reset(self):
         self._clear_online_data()

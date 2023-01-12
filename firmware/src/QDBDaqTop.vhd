@@ -37,9 +37,9 @@ port (
    DaqTx : out STD_LOGIC;
    DaqRx : in  STD_LOGIC;
    -- SAQ I/O
+   jb : out std_logic_vector(7 downto 0); -- output clks
    jd : in std_logic_vector(7 downto 0);
    jc : in std_logic_vector(7 downto 0);
---   Saq : in STD_LOGIC;
 
    -- PS ports
    DDR_addr          : inout STD_LOGIC_VECTOR (14 downto 0);
@@ -145,15 +145,18 @@ architecture Behavioral of QDBDaqTop is
    signal pulse_red    : std_logic                    := '0';
    signal pulse_blu    : std_logic                    := '0';
    signal pulse_gre    : std_logic                    := '0';
-   constant pulse_time : integer                      := 2_999_999;  -- fclk_freq / pulse_time = pulse's width
+   constant pulse_time : integer                      := 7_999_999;  -- fclk_freq / pulse_time = pulse's width
 
    -- SAQ signals / Constants
    constant N_SAQ_PORTS    : natural   := 16;
    constant TIMESTAMP_BITS : natural   := 32;
+   constant FCLK_FRQ       : natural := 30000000;
    signal saqMask          : std_logic_vector(N_SAQ_PORTS - 1 downto 0);
    signal saqPacketLength  : std_logic_vector(31 downto 0);
    signal saqEnable        : std_logic := '0';
    signal saqForce         : std_logic := '0';
+   signal saqRst           : std_logic := '0';
+   signal saqDiv           : std_logic_vector(31 downto 0);
    signal saqPortData      : std_logic_vector(N_SAQ_PORTS - 1 downto 0);
    signal saq_fifo_data    : std_logic_vector(63 downto 0);
    signal saq_fifo_valid   : std_logic := '0';
@@ -164,8 +167,8 @@ architecture Behavioral of QDBDaqTop is
    signal pulse_red6    : std_logic                    := '0';
    signal pulse_blu6    : std_logic                    := '0';
    signal pulse_gre6    : std_logic                    := '0';
-
-
+   
+   
    -- pulse LED procedure
    procedure pulseLED(variable flag : in boolean;
                       variable start_pulse : inout std_logic;
@@ -193,6 +196,8 @@ begin
     -- connect the switches to the LEDs
     -- led <= sw;
     je <= sw;
+--    je(0) <= fclk;
+--    je(3 downto 1) <= sw(3 downto 1);
     -- je(1) <= sw(1); -- direct pin or switch 
     DaqTx <= s_daqTx;
     s_daqRx <= DaqRx;   
@@ -222,7 +227,7 @@ begin
     
     
     counter: process(fclk, rst) is
-        constant count : natural := 12000000;
+        constant count : natural := FCLK_FRQ;
         variable hz : natural range 0 to count := 0;
     begin
         if rising_edge(fclk) then
@@ -298,6 +303,7 @@ begin
             S_AXIS_0_tlast   => S_AXI_0_tlast,
             S_AXIS_0_tvalid  => S_AXI_0_tvalid,
             S_AXIS_0_tkeep   => "1111",
+            s_axis_aresetn_0 => not saqRst,
 
             -- clk + rst
             aresetn                   => axi_resetn,
@@ -354,7 +360,7 @@ begin
    generic map (
       X_NUM_G        => X_NUM_G,
       Y_NUM_G        => Y_NUM_G,
-      Version        => x"0000_000e",
+      Version        => x"0000_002f",
       N_SAQ_PORTS    => N_SAQ_PORTS,
       TIMESTAMP_BITS => TIMESTAMP_BITS
    )
@@ -399,7 +405,9 @@ begin
       saqMask         => saqMask,
       saqPacketLength => saqPacketLength,
       saqEnable       => saqEnable,
+      saqDiv          => saqDiv,
       saqForce        => saqForce,
+      saqRst          => saqRst,
       saq_fifo_hits   => saq_fifo_hits,
       saq_fifo_full   => saq_fifo_full,
       saq_fifo_empty  => saq_fifo_empty,
@@ -454,7 +462,7 @@ begin
    TIMESTAMP_BITS => TIMESTAMP_BITS)
    port map(
       clk         => fclk,
-      rst         => not(axi_resetn(0)),
+      rst         => saqRst,
       saqPortData => saqPortData,
       saqReadEn   => saq_fifo_ren,
       saqDataOut  => saq_fifo_data,
@@ -473,9 +481,33 @@ begin
       saqMask         => saqMask,
       saqPacketLength => saqPacketLength,
       saqForce        => saqForce,
+      saqDiv          => saqDiv,
       saqEnable       => saqEnable
    );
+
+   ---------------------------------------------------
+   -- reset generator
+   ---------------------------------------------------
+    Gen_SAQPulse : for i in 1 to 8 generate
+        SAQPulse_U : entity work.SAQPulse
+          generic map(
+             INPUT_CLK_F    => FCLK_FRQ, -- MHz freq
+             PULSE_WIDTH_us => 10        -- us pulse width
+          )
+          port map(
+             clk => fclk,
+             rst => saqRst,
+    
+             -- input, register control
+             pulse_frq => std_logic_vector(to_unsigned(FCLK_FRQ/(2**i), 32)), -- 1 hz to start
+    
+             -- output
+             pulse_o => jb(i-1) -- directly pin to top level
+          );  
+    end generate;
+    
  
+ -- pulse relevant LEDs
  pulse : process (fclk, s_daqRx, s_daqTx) is
      -- variable conditions
      variable cr5 : boolean := false;
@@ -504,7 +536,7 @@ begin
        -- LED Flashing conditions
         cr5 := saqForce = '1';
         cg5 := saqEnable = '1';
-        cb5 := S_AXI_0_tready = '1';
+        cb5 := saqRst = '1';
               
         cr6 := saq_fifo_full = '1';
         cg6 := saq_fifo_empty = '1';

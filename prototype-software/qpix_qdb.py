@@ -282,7 +282,7 @@ class QPIX_GUI(QMainWindow):
         btn_sMask = QPushButton()
         btn_sMask.setText('Update SAQ Mask')
         btn_sMask.clicked.connect(self.setSAQMask)
-        btn_sMask.setEnabled(False)
+        # btn_sMask.setEnabled(False)
         hMaskLayout.addWidget(btn_sMask)
         layout.addLayout(hMaskLayout)
 
@@ -302,6 +302,23 @@ class QPIX_GUI(QMainWindow):
         btn_packetL.clicked.connect(self.setSAQLength)
         hLengthLayout.addWidget(btn_packetL)
         layout.addLayout(hLengthLayout)
+
+        hDivLayout = QHBoxLayout()
+        maskDiv = QLabel()
+        maskDiv.setText("Clk Div")
+        hDivLayout.addWidget(maskDiv)
+
+        saqDiv = QSpinBox()
+        saqDiv.setRange(1, 0xffff)
+        saqDiv.setValue(1)
+        saqDiv.valueChanged.connect(self.setSAQDiv)
+        hDivLayout.addWidget(saqDiv)
+        self._saqDivBox = saqDiv
+
+        self._saqDivLCD = QLCDNumber()
+        self._saqDivLCD.display(1)
+        hDivLayout.addWidget(self._saqDivLCD)
+        layout.addLayout(hDivLayout)
 
         hLCDlabel = QHBoxLayout()
         pktLabel = QLabel("Current Packet Length")
@@ -639,6 +656,33 @@ class QPIX_GUI(QMainWindow):
         else:
             print(f"mask correctly value set to: {mask:04x}")
 
+    def setSAQDiv(self):
+        """
+        Sets the divisor to the local clock. This value lengthens the amount of
+        time for a timestamp to increase. This register works as an integer
+        divisor of the remote clock.
+        """
+        nDiv = self._saqDivBox.value()
+        addr = REG.SAQ(SAQReg.SAQ_DIV)
+        self.qpi.regWrite(addr, nDiv)
+        setDiv = self.getSAQDiv()
+        if setDiv != nDiv:
+            print("warning! did not set correct values", setDiv," != ", nDiv)
+            self._saqDivReg = -1
+        else:
+            self._saqDivReg = setDiv
+            self._saqDivLCD.display(int(ZYBO_FRQ/setDiv))
+        
+    def getSAQDiv(self):
+        """
+        Read the value from the SAQDiv register. See setSAQDiv for description
+        of use of register.
+        """
+        addr = REG.SAQ(SAQReg.SAQ_DIV)
+        val = self.qpi.regRead(addr)
+        print("read reg value:", val)
+        return val
+
     def setSAQLength(self):
         """
         Read from the QSpinBox and set the new length register here. This will update
@@ -682,14 +726,18 @@ class QPIX_GUI(QMainWindow):
         """
         addr = REG.SAQ(SAQReg.SAQ_ENABLE)
         if self.saq_enable.isChecked():
+            # reset all data at the beginning of a run
+            self.SaqRst()
+
             val = 1
+
+            # update the packet length at the beginning of a run
+            self.setSAQLength()
+
             # restart the thread if we haven't started it yet
             if not self.qpi.thread.isRunning():
                 print("restarting udp collection thread")
                 self.qpi.thread.start()
-
-            # update the packet length at the beginning of a run
-            self.setSAQLength()
         else:
             val = 0
             self._stop_hits = self.getSAQHits()
@@ -700,6 +748,19 @@ class QPIX_GUI(QMainWindow):
         sndMask = self._saqMask if val == 1 else 0
         self.qpi.regWrite(addr, sndMask)
         self._saqMaskBox.setValue(sndMask)
+        if val == 1:
+            print("Saq Enabled")
+
+    def SaqRst(self):
+        """
+        Saq Reset is called to reset the FIFO and AXI-Stream FIFOs
+        which store reset data on the Zynq FPGA.
+        This reset will DELETE all currently stored reset data on the Zybo board.
+        """
+        print("reseting SAQ data")
+        addr = REG.SAQ(SAQReg.SAQ_RST)
+        # writing value doesn't matter for this register
+        self.qpi.regWrite(addr, 0)
 
     def flushSAQ(self):
         """
@@ -828,7 +889,7 @@ class QPIX_GUI(QMainWindow):
         if not found:
             return
         else:
-            args = [input_file, output_file, self.version, self._start_hits, self._stop_hits]
+            args = [input_file, output_file, self.version, self._start_hits, self._stop_hits, self._saqDivReg]
             args = [str(arg) for arg in args]
             subprocess.Popen(["python", "make_root.py", *args])
 

@@ -19,6 +19,9 @@ QP_IP      = '192.169.1.27'
 QP_PORT    = 42069
 BUFFER_SIZE = 1024
 
+# global of Zybo Frq which is used to calculate time value from timestamps
+ZYBO_FRQ = 30303030
+
 # UDP Info
 QP_UDP_IP   = '192.169.1.17'
 QP_UDP_PORT = 1337
@@ -95,6 +98,8 @@ class SAQReg(Enum):
     SAQ_FIFO_LNGTH = 0x55
     SAQ_FIFO_HITS = 0x56
     SAQ_FORCE = 0x57
+    SAQ_RST = 0x58
+    SAQ_DIV = 0x59
 
 
 def MemAddr(evt, pos):

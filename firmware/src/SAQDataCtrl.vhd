@@ -6,7 +6,7 @@
 -- Author     : Kevin Keefe <kevinpk@hawaii.edu>
 -- Company    :
 -- Created    : 2022-09-06
--- Last update: 2022-09-06
+-- Last update: 2023-01-12
 -- Platform   : Windows 11
 -- Standard   : VHDL08
 -------------------------------------------------------------------------------
@@ -44,7 +44,8 @@ port (
   saqCtrlOut      : out slv(N_SAQ_PORTS + TIMESTAMP_BITS - 1 downto 0);
   saqCtrlOutValid : out sl;
   -- Register Config ports
-  saqMask         : in  slv(N_SAQ_PORTS-1 downto 0)
+  saqMask         : in  slv(N_SAQ_PORTS-1 downto 0);
+  saqDiv          : in  slv(31 downto 0)
   );
   
 end SaqDataCtrl;
@@ -62,12 +63,16 @@ begin  -- architecture SAQDataCtrl
 
    -- increment counter
    process (clk, counter)
+     variable local_cnt : unsigned(31 downto 0) := (others => '0');
    begin
       if rising_edge(clk) then
+         local_cnt := local_cnt + 1;
          if rst = '1' then
             counter <= (others => '0');
-         else
+            local_cnt := (others => '0');
+         elsif local_cnt >= unsigned(saqDiv) then
             counter <= counter + 1;
+            local_cnt := (others => '0');
          end if;
       end if;
    end process;

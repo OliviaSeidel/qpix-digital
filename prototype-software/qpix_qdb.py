@@ -303,6 +303,23 @@ class QPIX_GUI(QMainWindow):
         hLengthLayout.addWidget(btn_packetL)
         layout.addLayout(hLengthLayout)
 
+        hDivLayout = QHBoxLayout()
+        maskDiv = QLabel()
+        maskDiv.setText("Clk Div")
+        hDivLayout.addWidget(maskDiv)
+
+        saqDiv = QSpinBox()
+        saqDiv.setRange(1, 0xffff)
+        saqDiv.setValue(1)
+        saqDiv.valueChanged.connect(self.setSAQDiv)
+        hDivLayout.addWidget(saqDiv)
+        self._saqDivBox = saqDiv
+
+        self._saqDivLCD = QLCDNumber()
+        self._saqDivLCD.display(1)
+        hDivLayout.addWidget(self._saqDivLCD)
+        layout.addLayout(hDivLayout)
+
         hLCDlabel = QHBoxLayout()
         pktLabel = QLabel("Current Packet Length")
         hitLabel = QLabel("Current Fifo Hits")
@@ -639,6 +656,33 @@ class QPIX_GUI(QMainWindow):
         else:
             print(f"mask correctly value set to: {mask:04x}")
 
+    def setSAQDiv(self):
+        """
+        Sets the divisor to the local clock. This value lengthens the amount of
+        time for a timestamp to increase. This register works as an integer
+        divisor of the remote clock.
+        """
+        nDiv = self._saqDivBox.value()
+        addr = REG.SAQ(SAQReg.SAQ_DIV)
+        self.qpi.regWrite(addr, nDiv)
+        setDiv = self.getSAQDiv()
+        if setDiv != nDiv:
+            print("warning! did not set correct values", setDiv," != ", nDiv)
+            self._saqDivReg = -1
+        else:
+            self._saqDivReg = setDiv
+            self._saqDivLCD.display(int(ZYBO_FRQ/setDiv))
+        
+    def getSAQDiv(self):
+        """
+        Read the value from the SAQDiv register. See setSAQDiv for description
+        of use of register.
+        """
+        addr = REG.SAQ(SAQReg.SAQ_DIV)
+        val = self.qpi.regRead(addr)
+        print("read reg value:", val)
+        return val
+
     def setSAQLength(self):
         """
         Read from the QSpinBox and set the new length register here. This will update
@@ -845,7 +889,7 @@ class QPIX_GUI(QMainWindow):
         if not found:
             return
         else:
-            args = [input_file, output_file, self.version, self._start_hits, self._stop_hits]
+            args = [input_file, output_file, self.version, self._start_hits, self._stop_hits, self._saqDivReg]
             args = [str(arg) for arg in args]
             subprocess.Popen(["python", "make_root.py", *args])
 

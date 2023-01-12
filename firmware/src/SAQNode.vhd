@@ -6,7 +6,7 @@
 -- Author     : Kevin Keefe <kevinpk@hawaii.edu>
 -- Company    :
 -- Created    : 2022-09-06
--- Last update: 2023-01-04
+-- Last update: 2023-01-12
 -- Platform   : Windows 11
 -- Standard   : VHDL08
 -------------------------------------------------------------------------------
@@ -57,6 +57,7 @@ port (
   saqHits         : out slv(31 downto 0);
   saqMask         : in  slv(N_SAQ_PORTS - 1 downto 0);
   saqPacketLength : in  slv(31 downto 0);
+  saqDiv          : in  slv(31 downto 0);
   saqForce        : in  sl;
   saqEnable       : in  sl
   );
@@ -127,6 +128,7 @@ begin  -- architecture SAQNode
       saqCtrlOut      => saqCtrlDataOut,
       saqCtrlOutValid => saqCtrlOutValid, -- SAQ trigger
       -- Register Config ports
+      saqDiv          => saqDiv,
       saqMask         => saqMask
     );
 

@@ -8,9 +8,9 @@ import datetime
 import argparse
 from array import array
 
-from qdb_interface import PACKET_HEADER, EXIT_PACKET
+from qdb_interface import PACKET_HEADER, EXIT_PACKET, ZYBO_FRQ
 
-def main(input_file, output_file, version, start_hits, triggers):
+def main(input_file, output_file, version, start_hits, triggers, saqDiv):
     """
     this script should be run from a selection within the GUI
     """
@@ -27,6 +27,8 @@ def main(input_file, output_file, version, start_hits, triggers):
     version = array('I', [version])
     start_hits = array('I', [start_hits])
     triggers = array('I', [triggers])
+    zFrq = array('I', [ZYBO_FRQ])
+    sDiv =  array('I', [saqDiv])
 
     timestamp = os.path.getmtime(input_file)
     time = datetime.date.fromtimestamp(timestamp).strftime('%m-%d-%Y %H:%M:%S')
@@ -35,6 +37,8 @@ def main(input_file, output_file, version, start_hits, triggers):
     meta_tt.Branch("Version", version, "version/I")
     meta_tt.Branch("start_hits", start_hits, "start_hits/I")
     meta_tt.Branch("Triggers", triggers, "triggers/I")
+    meta_tt.Branch("Zybo_FRQ", zFrq, "ZyboFrq/I")
+    meta_tt.Branch("SAQ_DIV", sDiv, "SaqDiv/I")
 
     # assign meta variables and fill before save
     meta_tt.Fill()

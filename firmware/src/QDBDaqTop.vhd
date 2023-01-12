@@ -156,6 +156,7 @@ architecture Behavioral of QDBDaqTop is
    signal saqEnable        : std_logic := '0';
    signal saqForce         : std_logic := '0';
    signal saqRst           : std_logic := '0';
+   signal saqDiv           : std_logic_vector(31 downto 0);
    signal saqPortData      : std_logic_vector(N_SAQ_PORTS - 1 downto 0);
    signal saq_fifo_data    : std_logic_vector(63 downto 0);
    signal saq_fifo_valid   : std_logic := '0';
@@ -359,7 +360,7 @@ begin
    generic map (
       X_NUM_G        => X_NUM_G,
       Y_NUM_G        => Y_NUM_G,
-      Version        => x"0000_001f",
+      Version        => x"0000_002f",
       N_SAQ_PORTS    => N_SAQ_PORTS,
       TIMESTAMP_BITS => TIMESTAMP_BITS
    )
@@ -404,6 +405,7 @@ begin
       saqMask         => saqMask,
       saqPacketLength => saqPacketLength,
       saqEnable       => saqEnable,
+      saqDiv          => saqDiv,
       saqForce        => saqForce,
       saqRst          => saqRst,
       saq_fifo_hits   => saq_fifo_hits,
@@ -479,6 +481,7 @@ begin
       saqMask         => saqMask,
       saqPacketLength => saqPacketLength,
       saqForce        => saqForce,
+      saqDiv          => saqDiv,
       saqEnable       => saqEnable
    );
 

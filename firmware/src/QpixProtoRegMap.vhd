@@ -65,6 +65,7 @@ entity QpixProtoRegMap is
       saqEnable       : out std_logic;
       saqForce        : out std_logic;
       saqRst          : out std_logic;
+      saqDiv          : out std_logic_vector(31 downto 0);
       saqPacketLength : out std_logic_vector(31 downto 0);
       --saq_fifo_valid  : in  std_logic;
       saq_fifo_empty  : in  std_logic;
@@ -270,7 +271,14 @@ begin
 
                when x"58" =>
                 if wen = '1' and req = '1' then
-                    saqRst <= '1';
+                    saqrst <= '1';
+                end if;
+
+               when x"59" =>
+                if wen = '1' and req = '1' then
+                    saqDiv <= wdata;
+                else
+                    rdata <= saq_scratch_word;
                 end if;
                
                when others => 

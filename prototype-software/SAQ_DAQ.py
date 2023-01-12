@@ -29,6 +29,7 @@ import subprocess
 N_SAQ_CHANNELS = 16
 
 class QPIX_GUI(QMainWindow):
+
     close_udp = pyqtSignal()
     
     def __init__(self):
@@ -142,10 +143,37 @@ class QPIX_GUI(QMainWindow):
 
     def _makeChannelsLayout(self):
         self._channelsPage = QWidget()
-        layout = QHBoxLayout()
+        layout = QVBoxLayout()
         label = QLabel()
         label.setText("Channels page")
         layout.addWidget(label)
+
+        hDivLayout = QHBoxLayout()
+        saqLengthL = QLabel()
+        saqLengthL.setText("Update Packet Length")
+        hDivLayout.addWidget(saqLengthL)
+
+        saqLength = QSpinBox()
+        saqLength.setRange(0, 0x0000_3fff)
+        saqLength.setValue(DEFAULT_PACKET_SIZE)
+        hDivLayout.addWidget(saqLength)
+        self._saqLength = saqLength
+
+        maskDiv = QLabel()
+        maskDiv.setText("Clk Div")
+        hDivLayout.addWidget(maskDiv)
+
+        saqDiv = QSpinBox()
+        saqDiv.setRange(1, 0xffff)
+        saqDiv.setValue(1)
+        saqDiv.valueChanged.connect(self.setSAQDiv)
+        hDivLayout.addWidget(saqDiv)
+        self._saqDivBox = saqDiv
+
+        self._saqDivLCD = QLCDNumber()
+        self._saqDivLCD.display(1)
+        hDivLayout.addWidget(self._saqDivLCD)
+        layout.addLayout(hDivLayout)
         
         ##Add graphs
         #graph = pg.GraphicsLayoutWidget(show = True, title = "Channels 1 - 16")
@@ -232,7 +260,6 @@ class QPIX_GUI(QMainWindow):
 
         btnLayout.addStretch() # vfill at the bottom
 
-
         #channel reset displays
         ncols = 4
         nrows = 8
@@ -272,11 +299,11 @@ class QPIX_GUI(QMainWindow):
 
     def startRun(self):
         print("start run clicked")
-        self.enableSAQ()
+        self.enableSAQ(True)
 
     def stopRun(self):
         print("stop run clicked")
-        self.disableSAQ()
+        self.enableSAQ(False)
 
     def clearData(self):
         print("clear data clicked")
@@ -296,24 +323,100 @@ class QPIX_GUI(QMainWindow):
     ## SAQ specific Commands  ##
     ############################
         
-        
-    def enableSAQ(self):
+    def enableSAQ(self, enable):
         """
-        read / write the single bit register at SaqEnable to turn on Axi Fifo streaming.
-        then update the saqMask to begin allowing triggers from saq pins
+        Toggle function to turn ON or OFF data collection.
+
+        saqEnable takes enable as boolean.
+        This function should enable the saqMask and update the packetLength.
+
+        This function similarly should turn OFF or set a value of 0 to the SAQMask.
+
+        Any non-zero SaqMask value will record triggers regardless of the value
+        of saqEnable which can cause continuous UDP data streams in firmware
+        version 0xe.
         """
         addr = REG.SAQ(SAQReg.SAQ_ENABLE)
-        # restart the thread if we haven't started it yet
-        if not self.qpi.thread.isRunning():
-            print("restarting udp collection thread")
-            self.qpi.thread.start()
-        self.qpi.regWrite(addr, 1)
+        if enable:
+            val = 1
+            # reset all data at the beginning of a run
+            self.SaqRst()
 
-        # start the graph update timer
-        self._graphTimer.start(self._plotUpdateCadence) # milliseconds
+            # update the packet length at the beginning of a run
+            self.setSAQLength()
+
+            # restart the thread if we haven't started it yet
+            if not self.qpi.thread.isRunning():
+                print("restarting udp collection thread")
+                self.qpi.thread.start()
+
+            # start the graph update timer
+            self._graphTimer.start(self._plotUpdateCadence) # milliseconds
+        else:
+            val = 0
+            self._stop_hits = self.getSAQHits()
+
+            self._graphTimer.stop()
+
+        self.qpi.regWrite(addr, val)
+
+        # enable the SAQ, update the mask, and put that value in the spin box
+        addr = REG.SAQ(SAQReg.MASK)
+        sndMask = self._saqMask if val == 1 else 0
+        self.qpi.regWrite(addr, sndMask)
+
+        if enable:
+            print("Saq Enabled")
+
         #self._graphTimer.timeout.connect(self._update_online_graphs)
         # reset the statistics (?)
         self._graph_reset()
+
+    def setSAQDiv(self):
+        """
+        Sets the divisor to the local clock. This value lengthens the amount of
+        time for a timestamp to increase. This register works as an integer
+        divisor of the remote clock.
+        """
+        nDiv = self._saqDivBox.value()
+        addr = REG.SAQ(SAQReg.SAQ_DIV)
+        self.qpi.regWrite(addr, nDiv)
+        setDiv = self.getSAQDiv()
+        if setDiv != nDiv:
+            print("warning! did not set correct values", setDiv," != ", nDiv)
+            self._saqDivReg = -1
+        else:
+            self._saqDivReg = setDiv
+            self._saqDivLCD.display(int(ZYBO_FRQ/setDiv))
+
+    def getSAQDiv(self):
+        """
+        Read the value from the SAQDiv register. See setSAQDiv for description
+        of use of register.
+        """
+        addr = REG.SAQ(SAQReg.SAQ_DIV)
+        val = self.qpi.regRead(addr)
+        print("read reg value:", val)
+        return val
+
+    def SaqRst(self):
+        """
+        Saq Reset is called to reset the FIFO and AXI-Stream FIFOs
+        which store reset data on the Zynq FPGA.
+        This reset will DELETE all currently stored reset data on the Zybo board.
+        """
+        addr = REG.SAQ(SAQReg.SAQ_RST)
+        # writing value doesn't matter for this register
+        self.qpi.regWrite(addr, 0)
+
+    def setSAQLength(self):
+        """
+        Read from the QSpinBox and set the new length register here. This will update
+        the amount of incoming works on each incoming UDP packet.
+        """
+        nPackets = self._saqLength.value()
+        addr = REG.SAQ(SAQReg.SAQ_FIFO_LNGTH)
+        self.qpi.regWrite(addr, nPackets)
 
     def _update_online_graphs(self):
         # update plot data
@@ -326,14 +429,11 @@ class QPIX_GUI(QMainWindow):
         # autoscale
         self.graph.autoRange()
 
-<<<<<<< HEAD
         #Update LCD display
         for ii in range(N_SAQ_CHANNELS):
             chan = ii + 1
             self.lcdChannels[ii].display(self._online_data['averageResetRates'][chan][-1])
             
-=======
->>>>>>> d01741fd2d082077265f00d28d7dbf3192a20193
         # prep for next plot point
         self._online_data['averageResetRates_time'].append(self._online_data['averageResetRates_time'][-1] +
                                                            self._plotUpdateCadence*0.001)
@@ -409,7 +509,7 @@ class QPIX_GUI(QMainWindow):
         if not found:
             return
         else:
-            args = [input_file, output_file, self.version, self._start_hits, self._stop_hits]
+            args = [input_file, output_file, self.version, self._start_hits, self._stop_hits, self._saqDivReg]
             args = [str(arg) for arg in args]
             print(f"args = {args}")
             subprocess.Popen(["python", "make_root.py", *args])

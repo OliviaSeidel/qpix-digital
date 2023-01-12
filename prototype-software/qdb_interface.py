@@ -350,38 +350,7 @@ class saqUDPworker(QObject):
         else:
             self._udpsocket.readyRead.connect(self.on_readyRead)
         
-    def run2(self):
-        """
-        DEFUNCT:  see run() instead
-        
-        try to connect to a socket, if successful wait listening forever.
-        """
 
-        if not self._udp_connect():
-            self.finished.emit()
-        else:
-            self.f = open(self.output_file, 'wb')
-            self._stopped = False
-            while not self._stopped:
-                while self._udpsocket.hasPendingDatagrams():
-                    (data, sender, port) = self._udpsocket.readDatagram(self._udpsocket.pendingDatagramSize())
-                    size = len(data)
-
-                    # print(f"reading UDP data from: {QHostAddress(sender)}@{port}, size:{size}, type: {type(data)}")
-                    # for i in range(int(size/4)):
-                    #     print(f'Word {i} {(int.from_bytes(data[i*4:i*4+4], byteorder="little")):08x}')
-                    # print(f'ID {(int.from_bytes(data[-2:], byteorder="little")):04x}')
-
-                    # receive a closing data packet to stop the client
-                    if data == EXIT_PACKET:
-                        self._stopped = True
-                    else:
-                        print(f"writing packet length {size}..")
-                        self.f.write(PACKET_HEADER+size.to_bytes(4, byteorder="little")+data)
-            self.f.close()
-            self.finished.emit()
-
-            
 class DMA_REG(Enum):
     """
     Enum class to specific DMA registers of interest to be used during

@@ -79,6 +79,7 @@ class QPIX_GUI(QMainWindow):
 
         # initialize the sub menus
         self._make_menuBar()
+        self._make_statusBar()
 
         # create the layouts that are needed for making the GUI pretty
         self.tabW = QTabWidget()
@@ -122,25 +123,26 @@ class QPIX_GUI(QMainWindow):
             # metadata
             mm = struct.unpack("<H", data[ii:ii+2])[0]
             ii += 2
-            print(f"    {tt}, {cc}, {mm}")
+            if self.dbg_packet.isChecked():
+                print(f"    {tt}, {cc}, {mm}")
             
             # update online data stats
             chans = self.chans_with_resets(cc)
             for chan in chans:
-                # self._online_data['averageResetRates'][chan][-1] += 1/(self._plotUpdateCadence*0.001)
-                self._online_data['totalResets'][chan] += 1
+                self._online_data['averageResetRates'][chan][-1] += 1./(self._plotUpdateCadence*0.001)
+                self._online_data['totalResets'][chan-1] += 1
 
         pid = struct.unpack("<H", data[-2:])[0]
-        print(f"    {pid}")
+        if self.dbg_packet.isChecked():
+            print(f"    {pid}")
 
     def chans_with_resets(self, mask):
         """
         List comprehension to convert 16 bit mask word into a list with all active channels.
+        input: 16b unsigned value
+        output: list of channels, starting from 1
         """
-        # input: mask
-        # output: list of channels in that mask
-        # e.g. chans_with_resets(19) returns [1,2,16]
-        chans = [x for x in range(N_SAQ_CHANNELS) if 2**x & mask]
+        chans = [x+1 for x in range(N_SAQ_CHANNELS) if 2**x & mask]
         return chans
         
     def on_new_data(self, data):
@@ -388,6 +390,10 @@ class QPIX_GUI(QMainWindow):
         self.qpi.regWrite(addr, nDiv)
         self._saqDivReg = nDiv
         self._saqDivLCD.display(int(ZYBO_FRQ/nDiv))
+        div = self.getSAQDiv()
+        if div != nDiv:
+            print("WARNING! mismatch between SAQ-DIV!")
+            self._saqDivReg = -1
 
     def getSAQDiv(self):
         """
@@ -433,9 +439,11 @@ class QPIX_GUI(QMainWindow):
         #Update LCD display
         for ii in range(N_SAQ_CHANNELS):
             chan = ii + 1
-            self.lcdChannels[ii].display(self._online_data['averageResetRates'][chan][-1])
-            self.lcdChannels[ii].display(self._online_data['totalResets'][chan-1])
-            
+            if self.lcd_toggle.isChecked():
+                self.lcdChannels[ii].display(self._online_data['totalResets'][chan-1])
+            else:
+                self.lcdChannels[ii].display(self._online_data['averageResetRates'][chan][-1])
+
         # prep for next plot point
         self._online_data['averageResetRates_time'].append(self._online_data['averageResetRates_time'][-1] +
                                                            self._plotUpdateCadence*0.001)
@@ -539,6 +547,35 @@ class QPIX_GUI(QMainWindow):
         fileMenu = menubar.addMenu('File')
         fileMenu.addAction(exitAct)
         fileMenu.addAction(saveAct)
+
+    def _make_statusBar(self):
+        """
+        Configurable options for the front tab of the window.
+        Mostly used to update QLCDs, if they show total resets or recent average
+        """
+
+        # manage whether or not the UDP / TCP connections are valid
+        self.statusBar = QStatusBar()
+        self.setStatusBar(self.statusBar)
+        self.lcd_toggle = QCheckBox("Display Reset Totals")
+        self.lcd_toggle.clicked.connect(self.toggleLCD)
+        self.statusBar.addWidget(self.lcd_toggle)
+
+        self.lcd_label = QLabel("Displaying Average..")
+        self.statusBar.addWidget(self.lcd_label)
+
+        self.dbg_packet = QCheckBox("Packet Debug")
+        self.statusBar.addWidget(self.dbg_packet)
+
+    def toggleLCD(self):
+        """
+        Toggle which values should be displayed in the QLCD Values
+        """
+        if self.lcd_toggle.isChecked():
+            self.lcd_label.setText("Displaying Total Resets")
+        else:
+            self.lcd_label.setText("Displaying Average Resets")
+
 
     def closeEvent(self, event):
         print("closing the main gui")

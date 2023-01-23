@@ -278,7 +278,7 @@ begin
                 if wen = '1' and req = '1' then
                     saqDiv <= wdata;
                 else
-                    rdata <= saq_scratch_word;
+                    rdata <= saqDiv;
                 end if;
                
                when others => 

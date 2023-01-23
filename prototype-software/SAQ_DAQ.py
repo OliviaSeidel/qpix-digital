@@ -1,5 +1,5 @@
 # interfacing dependcies
-from qdb_interface import (AsicREG, AsicCMD, AsicEnable, AsicMask,
+from qdb_interface import (AsicREG, AsicCMD, AsicEnable, AsicMask, ZYBO_FRQ,
                            qdb_interface, QDBBadAddr, REG, SAQReg, DEFAULT_PACKET_SIZE)
 import os
 import sys
@@ -82,13 +82,14 @@ class QPIX_GUI(QMainWindow):
 
         # create the layouts that are needed for making the GUI pretty
         self.tabW = QTabWidget()
-        self.tabW.addTab(self._makeGeneralLayout(), "General")
-        self.tabW.addTab(self._makeChannelsLayout(), "Channels")
+        self.tabW.addTab(self._makeGeneralLayout(),  "General")
         self.tabW.addTab(self._makeAdvancedLayout(), "Advanced")
+        self.tabW.addTab(self._makeChannelsLayout(), "Channels")
         self.setCentralWidget(self.tabW)
 
         # show the main window
         self.show()
+        self.setSAQDiv()
 
         # FIXME: may go elsewhere...?
         self.updateChannelMaskOnZybo() 
@@ -96,6 +97,7 @@ class QPIX_GUI(QMainWindow):
     def _init_online_data(self):
         self._online_data = {}
         self._online_data['averageResetRates'] = {}
+        self._online_data['totalResets'] = N_SAQ_CHANNELS * [0]
         self._clear_online_data()
         
     def _clear_online_data(self):
@@ -104,7 +106,8 @@ class QPIX_GUI(QMainWindow):
         for ii in range(N_SAQ_CHANNELS):
             chan = ii+1
             self._online_data['averageResetRates'][chan] = [0]
-       
+        self._online_data['totalResets'] = N_SAQ_CHANNELS * [0]
+
     def parse_data(self, data):
         nwords = int(len(data)/8)
 
@@ -124,18 +127,20 @@ class QPIX_GUI(QMainWindow):
             # update online data stats
             chans = self.chans_with_resets(cc)
             for chan in chans:
-                self._online_data['averageResetRates'][chan][-1] += 1/(self._plotUpdateCadence*0.001)
+                # self._online_data['averageResetRates'][chan][-1] += 1/(self._plotUpdateCadence*0.001)
+                self._online_data['totalResets'][chan] += 1
 
         pid = struct.unpack("<H", data[-2:])[0]
         print(f"    {pid}")
 
     def chans_with_resets(self, mask):
+        """
+        List comprehension to convert 16 bit mask word into a list with all active channels.
+        """
         # input: mask
         # output: list of channels in that mask
         # e.g. chans_with_resets(19) returns [1,2,16]
-        binstr = bin(mask)[2:]      # e.g. 10011 for mask=19
-        binstr_reverse = binstr[::-1]   # e.g. 11001
-        chans = [2**x for x in range(len(binstr_reverse)) if binstr_reverse[x] == '1']  # e.g. [1,2,16]
+        chans = [x for x in range(N_SAQ_CHANNELS) if 2**x & mask]
         return chans
         
     def on_new_data(self, data):
@@ -167,7 +172,6 @@ class QPIX_GUI(QMainWindow):
         saqDiv.setRange(1, 0xffff)
         saqDiv.setValue(1)
         saqDiv.valueChanged.connect(self.setSAQDiv)
-        self.setSAQDiv()
         hDivLayout.addWidget(saqDiv)
         self._saqDivBox = saqDiv
 
@@ -382,18 +386,14 @@ class QPIX_GUI(QMainWindow):
         nDiv = self._saqDivBox.value()
         addr = REG.SAQ(SAQReg.SAQ_DIV)
         self.qpi.regWrite(addr, nDiv)
-        setDiv = self.getSAQDiv()
-        if setDiv != nDiv:
-            print("warning! did not set correct values", setDiv," != ", nDiv)
-            self._saqDivReg = -1
-        else:
-            self._saqDivReg = setDiv
-            self._saqDivLCD.display(int(ZYBO_FRQ/setDiv))
+        self._saqDivReg = nDiv
+        self._saqDivLCD.display(int(ZYBO_FRQ/nDiv))
 
     def getSAQDiv(self):
         """
         Read the value from the SAQDiv register. See setSAQDiv for description
         of use of register.
+        0x2f version has bug!
         """
         addr = REG.SAQ(SAQReg.SAQ_DIV)
         val = self.qpi.regRead(addr)
@@ -434,6 +434,7 @@ class QPIX_GUI(QMainWindow):
         for ii in range(N_SAQ_CHANNELS):
             chan = ii + 1
             self.lcdChannels[ii].display(self._online_data['averageResetRates'][chan][-1])
+            self.lcdChannels[ii].display(self._online_data['totalResets'][chan-1])
             
         # prep for next plot point
         self._online_data['averageResetRates_time'].append(self._online_data['averageResetRates_time'][-1] +

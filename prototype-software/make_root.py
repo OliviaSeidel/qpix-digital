@@ -10,7 +10,7 @@ from array import array
 
 from qdb_interface import PACKET_HEADER, EXIT_PACKET, ZYBO_FRQ
 
-def main(input_file, output_file, version, start_hits, triggers, saqDiv):
+def main(input_file, output_file, version, start_hits, triggers, saqDiv=0):
     """
     this script should be run from a selection within the GUI
     """
@@ -94,7 +94,7 @@ def main(input_file, output_file, version, start_hits, triggers, saqDiv):
         os.remove(input_file)
 
 if __name__ == "__main__":
-    if len(sys.argv) != 6:
+    if len(sys.argv) != 7:
         print("ERROR should only run by qpix_qdb with required arguments")
     else:
         input_file = sys.argv[1]

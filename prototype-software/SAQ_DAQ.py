@@ -41,7 +41,7 @@ class QPIX_GUI(QMainWindow):
         self.qpi.worker.new_data.connect(self.on_new_data)
         self._tf = ROOT.TFile("./test.root", "RECREATE")
         self._tt = ROOT.TTree("qdbData", "data_tree")
-        self._saqMask = 0
+        self._saqMask = 0xffff
 
         # SAQ meta data information
         self._start_hits = 0
@@ -167,6 +167,7 @@ class QPIX_GUI(QMainWindow):
         saqDiv.setRange(1, 0xffff)
         saqDiv.setValue(1)
         saqDiv.valueChanged.connect(self.setSAQDiv)
+        self.setSAQDiv()
         hDivLayout.addWidget(saqDiv)
         self._saqDivBox = saqDiv
 
@@ -420,7 +421,7 @@ class QPIX_GUI(QMainWindow):
 
     def _update_online_graphs(self):
         # update plot data
-        print("_update_online_graphs()")
+        print("...", end=" ")
         for ii in range(N_SAQ_CHANNELS):
             chan = ii+1
             self.plotLines[ii].setData(self._online_data['averageResetRates_time'],
